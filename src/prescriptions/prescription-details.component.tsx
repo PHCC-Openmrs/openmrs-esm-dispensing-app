@@ -5,7 +5,10 @@ import { useTranslation } from 'react-i18next';
 import { type PatientUuid, useConfig, UserHasAccess } from '@openmrs/esm-framework';
 import {
   computeMedicationRequestCombinedStatus,
+  computeTotalQuantityDispensed,
+  computeTotalQuantityOrdered,
   getConceptCodingDisplay,
+  getQuantityUnitsMatch,
   useStaleEncounterUuids,
   getMostRecentMedicationDispenseStatus,
 } from '../utils';
@@ -71,6 +74,19 @@ const PrescriptionDetails: React.FC<{
     }
 
     return null;
+  };
+
+  const getDispensedProgress = (medicationRequestBundle: MedicationRequestBundle) => {
+    if (
+      !medicationRequestBundle.dispenses?.length ||
+      !getQuantityUnitsMatch([medicationRequestBundle.request, ...medicationRequestBundle.dispenses])
+    ) {
+      return { quantityDispensed: undefined, totalQuantityOrdered: undefined };
+    }
+    return {
+      quantityDispensed: computeTotalQuantityDispensed(medicationRequestBundle.dispenses),
+      totalQuantityOrdered: computeTotalQuantityOrdered(medicationRequestBundle.request),
+    };
   };
 
   const displayAllergies = (allergies: Array<AllergyIntolerance>): string => {
@@ -145,7 +161,8 @@ const PrescriptionDetails: React.FC<{
             <MedicationEvent
               key={bundle.request.id}
               medicationEvent={bundle.request}
-              status={generateStatusTag(bundle)}>
+              status={generateStatusTag(bundle)}
+              {...getDispensedProgress(bundle)}>
               <UserHasAccess privilege={PRIVILEGE_CREATE_DISPENSE}>
                 <ActionButtons
                   patientUuid={patientUuid}

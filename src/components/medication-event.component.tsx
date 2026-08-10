@@ -22,7 +22,9 @@ const MedicationEvent: React.FC<{
   status?: ReactNode;
   children?: ReactNode;
   isDispenseEvent?: boolean;
-}> = ({ medicationEvent, status = null, children, isDispenseEvent }) => {
+  quantityDispensed?: number;
+  totalQuantityOrdered?: number;
+}> = ({ medicationEvent, status = null, children, isDispenseEvent, quantityDispensed, totalQuantityOrdered }) => {
   const { t } = useTranslation();
   const dosageInstruction = getDosageInstruction(medicationEvent.dosageInstruction);
   const isFreeTextDosage = calculateIsFreeTextDosage(dosageInstruction);
@@ -73,6 +75,19 @@ const MedicationEvent: React.FC<{
             <span className={styles.label01}>{t('quantity', 'Quantity').toUpperCase()}</span>{' '}
             <span className={styles.quantity}>
               {quantity.value} {quantity.unit}
+            </span>
+          </p>
+        )}
+
+        {totalQuantityOrdered != null && (
+          <p className={styles.bodyLong01}>
+            <span className={styles.label01}>{t('dispensed', 'Dispensed').toUpperCase()}</span>{' '}
+            <span className={styles.quantity}>
+              {t('quantityDispensedOfTotal', '{{dispensed}} of {{total}} {{unit}}', {
+                dispensed: quantityDispensed ?? 0,
+                total: totalQuantityOrdered,
+                unit: quantity?.unit ?? '',
+              })}
             </span>
           </p>
         )}

@@ -163,8 +163,9 @@ export const configSchema = {
   },
   completeOrderWithThisDispense: {
     _type: Type.Boolean,
-    _description: 'Enable or disable the "Complete order with this dispense" checkbox on the dispense form.',
-    _default: false,
+    _description:
+      'Enable or disable automatically marking an order as complete/closed whenever any dispense is recorded against it, regardless of whether the full ordered quantity was dispensed.',
+    _default: true,
   },
   customTabs: {
     _type: Type.Array,

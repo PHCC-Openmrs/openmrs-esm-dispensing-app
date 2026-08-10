@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useSWRConfig } from 'swr';
 import { useTranslation } from 'react-i18next';
-import { Button, Checkbox, Form, FormLabel, InlineLoading } from '@carbon/react';
+import { Button, Form, FormLabel, InlineLoading } from '@carbon/react';
 import {
   ExtensionSlot,
   getCoreTranslation,
@@ -75,8 +75,6 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
 
   // to prevent duplicate submits
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const [shouldCompleteOrder, setShouldCompleteOrder] = useState(false);
 
   const [isFreeTextDosage, setIsFreeTextDosage] = useState(() => {
     const dosageInstruction = getDosageInstruction(medicationDispense?.dosageInstruction);
@@ -162,7 +160,7 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
     return saveMedicationDispense(medicationDispensePayload, MedicationDispenseStatus.completed, abortController)
       .then((response) => {
         if (response.ok) {
-          if (config.completeOrderWithThisDispense && shouldCompleteOrder) {
+          if (config.completeOrderWithThisDispense) {
             return updateMedicationRequestFulfillerStatus(
               getUuidFromReference(
                 medicationDispensePayload.authorizingPrescription[0].reference, // assumes authorizing prescription exist
@@ -217,7 +215,7 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
       .then(
         (response) => {
           const { status } = response;
-          if (config.completeOrderWithThisDispense && shouldCompleteOrder && response?.data?.status === 'completed') {
+          if (config.completeOrderWithThisDispense && response?.data?.status === 'completed') {
             showSnackbar({
               title: t('prescriptionCompleted', 'Prescription completed'),
               kind: 'success',
@@ -296,18 +294,6 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
     );
   }, [isFreeTextDosage, medicationDispensePayload, quantityRemaining]);
 
-  // Auto-default "Complete Order With This Dispense" checkbox for orders with no refills
-  useEffect(() => {
-    // Only auto-default in 'enter' mode when creating a new dispense
-    if (mode === 'enter' && medicationRequestBundle?.request?.dispenseRequest) {
-      const numberOfRepeatsAllowed = medicationRequestBundle.request.dispenseRequest.numberOfRepeatsAllowed;
-      // Default to true if order doesn't support refills
-      if (numberOfRepeatsAllowed === 0 || numberOfRepeatsAllowed === null || numberOfRepeatsAllowed === undefined) {
-        setShouldCompleteOrder(true);
-      }
-    }
-  }, [medicationRequestBundle, mode]);
-
   const isButtonDisabled = (config.enableStockDispense ? !inventoryItem : false) || !isValid || isSubmitting;
 
   const handleSubmitOrDuplicateCheck = () => {
@@ -358,14 +344,6 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
                   quantityRemaining={quantityRemaining}
                   quantityDispensed={quantityDispensed}
                 />
-                {config.completeOrderWithThisDispense && mode === 'enter' && !medicationDispense?.id && (
-                  <Checkbox
-                    id="complete-order-with-this-dispense"
-                    labelText={t('completeOrderWithThisDispense', 'Complete order with this dispense')}
-                    checked={shouldCompleteOrder}
-                    onChange={(_, { checked }) => setShouldCompleteOrder(checked)}
-                  />
-                )}
                 {config.enableStockDispense && (
                   <StockDispense
                     inventoryItem={inventoryItem}
