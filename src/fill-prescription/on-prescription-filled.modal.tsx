@@ -20,6 +20,7 @@ import {
   useProviders,
 } from '../medication-dispense/medication-dispense.resource';
 import { type PharmacyConfig } from '../config-schema';
+import { notifyIfPrescriptionFulfillmentComplete } from '../pharmacy-queue-notification';
 import MedicationEvent from '../components/medication-event.component';
 import { MedicationDispenseStatus, MedicationRequestFulfillerStatus } from '../types';
 import styles from './on-prescription-filled.scss';
@@ -44,7 +45,7 @@ interface OnPrescriptionFilledModalProps {
  * would like to immediately mark the medication orders as dispensed.
  */
 const OnPrescriptionFilledModal: React.FC<OnPrescriptionFilledModalProps> = ({ patient, encounterUuid, close }) => {
-  const { dispenserProviderRoles } = useConfig<PharmacyConfig>();
+  const { dispenserProviderRoles, medicationRequestExpirationPeriodInDays } = useConfig<PharmacyConfig>();
   const session = useSession();
   const providers = useProviders(dispenserProviderRoles);
   const { medicationRequestBundles, isLoading: isLoadingPrescriptionDetails } = usePrescriptionDetails(encounterUuid);
@@ -103,6 +104,7 @@ const OnPrescriptionFilledModal: React.FC<OnPrescriptionFilledModalProps> = ({ p
       close();
     } finally {
       revalidate(mutate, encounterUuid);
+      notifyIfPrescriptionFulfillmentComplete(encounterUuid, patient.id, medicationRequestExpirationPeriodInDays);
       setIsSubmitting(false);
     }
   };

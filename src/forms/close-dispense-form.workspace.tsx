@@ -17,6 +17,7 @@ import { updateMedicationRequestFulfillerStatus } from '../medication-request/me
 import { type MedicationDispense, MedicationDispenseStatus, MedicationRequestFulfillerStatus } from '../types';
 import { type PharmacyConfig } from '../config-schema';
 import { getUuidFromReference, markEncounterAsStale, revalidate } from '../utils';
+import { notifyIfPrescriptionFulfillmentComplete } from '../pharmacy-queue-notification';
 import styles from './forms.scss';
 
 type CloseDispenseFormProps = {
@@ -87,6 +88,11 @@ const CloseDispenseForm: React.FC<Workspace2DefinitionProps<CloseDispenseFormPro
         .then((response) => {
           if (response.ok) {
             revalidate(mutate, encounterUuid);
+            notifyIfPrescriptionFulfillmentComplete(
+              encounterUuid,
+              patientUuid,
+              config.medicationRequestExpirationPeriodInDays,
+            );
             showSnackbar({
               kind: 'success',
               title: t(

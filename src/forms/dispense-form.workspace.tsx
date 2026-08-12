@@ -29,6 +29,7 @@ import {
   revalidate,
 } from '../utils';
 import { type PharmacyConfig } from '../config-schema';
+import { notifyIfPrescriptionFulfillmentComplete } from '../pharmacy-queue-notification';
 import { createStockDispenseRequestPayload, sendStockDispenseRequest } from './stock-dispense/stock.resource';
 import { saveMedicationDispense } from '../medication-dispense/medication-dispense.resource';
 import { updateMedicationRequestFulfillerStatus } from '../medication-request/medication-request.resource';
@@ -227,6 +228,11 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
           }
           if (status === 201 || status === 200) {
             revalidate(mutate, encounterUuid);
+            notifyIfPrescriptionFulfillmentComplete(
+              encounterUuid,
+              patientUuid,
+              config.medicationRequestExpirationPeriodInDays,
+            );
             showSnackbar({
               kind: 'success',
               subtitle: t('medicationListUpdated', 'Medication dispense list has been updated.'),
