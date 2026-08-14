@@ -22,6 +22,13 @@ const StockDispense: React.FC<StockDispenseProps> = ({ medicationDispense, updat
     .filter((item) => isValidBatch(medicationDispense, item))
     .sort((a, b) => new Date(a.expiration).getTime() - new Date(b.expiration).getTime());
 
+  // Total physical stock at this location, across all batches - independent of the
+  // expiry-vs-duration filtering above, since a pharmacist checking "how much is left"
+  // wants the real on-hand amount, not just what happens to be eligible to dispense.
+  const totalQuantity = inventoryItems.reduce((sum, item) => sum + (item.quantity ?? 0), 0);
+  const quantityUoM = inventoryItems[0]?.quantityUoM ?? '';
+  const locationName = inventoryItems[0]?.partyName ?? '';
+
   function parseDate(dateString) {
     return new Date(dateString);
   }
@@ -109,6 +116,33 @@ const StockDispense: React.FC<StockDispenseProps> = ({ medicationDispense, updat
 
   return (
     <Layer>
+      {totalQuantity > 0 ? (
+        <InlineNotification
+          aria-label="closes notification"
+          kind="info"
+          lowContrast={true}
+          hideCloseButton={true}
+          statusIconDescription="notification"
+          title={t('stockAvailable', 'Available in stock')}
+          subtitle={t('stockAvailableDetails', '{{quantity}} {{quantityUoM}} left at {{location}}', {
+            quantity: Math.floor(totalQuantity),
+            quantityUoM,
+            location: locationName,
+          })}
+        />
+      ) : (
+        <InlineNotification
+          aria-label="closes notification"
+          kind="warning"
+          lowContrast={true}
+          hideCloseButton={true}
+          statusIconDescription="notification"
+          title={t('noStockAvailable', 'No item in inventory')}
+          subtitle={t('noStockAvailableDetails', 'There is no stock of this medicine at {{location}}', {
+            location: locationName,
+          })}
+        />
+      )}
       <ComboBox
         id="stockDispense"
         items={validInventoryItems}
