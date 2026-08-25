@@ -10,6 +10,8 @@ import {
   showSnackbar,
   useConfig,
   useLayoutType,
+  useSession,
+  userHasAccess,
   type FetchResponse,
   type Order,
   type Visit,
@@ -23,6 +25,9 @@ const FillPrescriptionButton: React.FC<{}> = () => {
   const responsiveSize = isTablet ? 'lg' : 'md';
   const { t } = useTranslation();
   const { drugOrderTypeUUID } = useConfig<PharmacyConfig>();
+  const session = useSession();
+  const canFillPrescription =
+    userHasAccess('Add Orders', session?.user) || userHasAccess('Edit Orders', session?.user);
 
   const launchSearchWorkspace = () => {
     launchWorkspace2(
@@ -75,6 +80,10 @@ const FillPrescriptionButton: React.FC<{}> = () => {
       },
     );
   };
+
+  if (!canFillPrescription) {
+    return null;
+  }
 
   return (
     <div className={styles.buttonContainer}>
