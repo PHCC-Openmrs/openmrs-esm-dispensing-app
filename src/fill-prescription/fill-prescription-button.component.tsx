@@ -26,8 +26,7 @@ const FillPrescriptionButton: React.FC<{}> = () => {
   const { t } = useTranslation();
   const { drugOrderTypeUUID } = useConfig<PharmacyConfig>();
   const session = useSession();
-  const canFillPrescription =
-    userHasAccess('Add Orders', session?.user) || userHasAccess('Edit Orders', session?.user);
+  const canFillPrescription = userHasAccess('Task: patientChart.addDrugOrder', session?.user);
 
   const launchSearchWorkspace = () => {
     launchWorkspace2(
