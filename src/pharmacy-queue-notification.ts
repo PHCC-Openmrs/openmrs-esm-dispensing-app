@@ -1,6 +1,5 @@
 import { getPrescriptionDetails } from './medication-request/medication-request.resource';
-import { computePrescriptionStatus } from './utils';
-import { MedicationRequestCombinedStatus } from './types';
+import { computePrescriptionState, summarizePrescriptionStates } from './prescription-state';
 
 // Consumed by esm-service-queues-app (if installed) to auto-end a patient's pharmacy queue
 // entry. There is no shared event bus between these independently-versioned apps - this is
@@ -9,13 +8,18 @@ import { MedicationRequestCombinedStatus } from './types';
 export const PHARMACY_FULFILLMENT_COMPLETED_EVENT = 'pharmacy-fulfillment-completed';
 
 /**
- * Checks whether every medication request tied to the given prescription encounter has reached
- * a terminal state (completed, declined, cancelled, or expired - i.e. nothing active or on_hold
- * remains), and if so, dispatches `pharmacy-fulfillment-completed` so other apps can react to
- * "this patient's pharmacy visit is done."
+ * Checks whether every medication request tied to the given prescription encounter is finished
+ * with pharmacy - meaning none of them has an action left for a pharmacist to take - and if so,
+ * dispatches `pharmacy-fulfillment-completed` so other apps can react to "this patient's
+ * pharmacy visit is done."
  *
- * Call after a dispense/decline is saved - but not after pausing one (`on_hold` must not be
- * treated as complete).
+ * "Finished" is deliberately the same state -> action table the buttons use, so the queue entry
+ * cannot be ended while a request in the prescription still shows a button. Note that this keeps
+ * the entry open for an expired request nobody has closed yet, which is outstanding pharmacy work
+ * even though nothing more can be dispensed against it.
+ *
+ * Call after a dispense/decline is saved - but not after pausing one (a paused request can still
+ * be dispensed, so it is not finished).
  */
 export async function notifyIfPrescriptionFulfillmentComplete(
   encounterUuid: string,
@@ -28,15 +32,14 @@ export async function notifyIfPrescriptionFulfillmentComplete(
 
   try {
     const { medicationRequestBundles } = await getPrescriptionDetails(encounterUuid);
-    const medicationRequests = medicationRequestBundles.map((bundle) => bundle.request);
-    const status = computePrescriptionStatus(medicationRequests, medicationRequestExpirationPeriodInDays);
+    const states = medicationRequestBundles.map((bundle) =>
+      computePrescriptionState(bundle, { medicationRequestExpirationPeriodInDays }),
+    );
+    // asks whether any pharmacy action remains at all, rather than whether this particular
+    // site happens to show the button for it
+    const summary = summarizePrescriptionStates(states, { pauseButtonEnabled: true, closeButtonEnabled: true });
 
-    const isTerminal =
-      status != null &&
-      status !== MedicationRequestCombinedStatus.active &&
-      status !== MedicationRequestCombinedStatus.on_hold;
-
-    if (isTerminal) {
+    if (summary != null && summary.actionableCount === 0) {
       window.dispatchEvent(
         new CustomEvent(PHARMACY_FULFILLMENT_COMPLETED_EVENT, { detail: { patientUuid, encounterUuid } }),
       );

@@ -1,4 +1,5 @@
 import { type OpenmrsResource } from '@openmrs/esm-framework';
+import { type PrescriptionStatusSummary } from './prescription-state';
 
 export interface AllergyIntolerance {
   resourceType: string;
@@ -328,6 +329,8 @@ export interface MedicationRequest {
     quantity: Quantity;
     validityPeriod: {
       start: string;
+      /** Maps to the order's auto expire date; authoritative for expiry when present. */
+      end?: string;
     };
   };
   authoredOn?: string;
@@ -446,7 +449,8 @@ export interface PrescriptionsTableRow {
   prescriber: string;
   drugs: string;
   lastDispenser: string;
-  status: string;
+  /** Rolled up from the state of every medication request in the prescription. */
+  status: PrescriptionStatusSummary;
   location: string;
 }
 

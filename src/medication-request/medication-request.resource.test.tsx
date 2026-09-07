@@ -23,11 +23,13 @@ vi.mock('react', async (importOriginal) => {
   };
 });
 
+const allButtonsEnabled = { pauseButtonEnabled: true, closeButtonEnabled: true };
+
 describe('Medication Request Resource Test', () => {
   test('usePrescriptionsTable should call active endpoint and proper date based on expiration period if status parameter is active', () => {
     // @ts-ignore
     useSWR.mockImplementation(() => ({ data: { data: 'mockedReturnData' } }));
-    usePrescriptionsTable(true, '', 'ACTIVE', 5, 5, 'bob', null, 10, 10000);
+    usePrescriptionsTable(true, '', 'ACTIVE', 5, 5, 'bob', null, 10, 10000, allButtonsEnabled);
     expect(useSWR).toHaveBeenCalledWith(
       `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequests&_getpagesoffset=5&_count=5&date=ge${dayjs()
         .startOf('day')
@@ -41,7 +43,7 @@ describe('Medication Request Resource Test', () => {
   test('usePrescriptionsTable should call all endpoint if status parameter is not active', () => {
     // @ts-ignore
     useSWR.mockImplementation(() => ({ data: { data: 'mockedReturnData' } }));
-    usePrescriptionsTable(true, '', '', 5, 5, 'bob', null, 10, 10000);
+    usePrescriptionsTable(true, '', '', 5, 5, 'bob', null, 10, 10000, allButtonsEnabled);
     expect(useSWR).toHaveBeenCalledWith(
       `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequests&_getpagesoffset=5&_count=5&status=&patientSearchTerm=bob`,
       openmrsFetch,
@@ -65,6 +67,7 @@ describe('Medication Request Resource Test', () => {
       ],
       10,
       10000,
+      allButtonsEnabled,
     );
 
     expect(useSWR).toHaveBeenCalledWith(
@@ -631,6 +634,7 @@ describe('Medication Request Resource Test', () => {
       [],
       90,
       10000,
+      allButtonsEnabled,
     );
     expect(totalOrders).toBe(26);
     expect(prescriptionsTableRows.length).toBe(2);
@@ -641,7 +645,11 @@ describe('Medication Request Resource Test', () => {
     expect(prescriptionsTableRows[0].patient.name).toBe('Dylan, Bob (ZL EMR ID: Y2CK2G)');
     expect(prescriptionsTableRows[0].patient.uuid).toBe('558494fe-5850-4b34-a3bf-06550334ba4a');
     expect(prescriptionsTableRows[0].prescriber).toBe('Goodrich, Mark (Identifier: MAADH)');
-    expect(prescriptionsTableRows[0].status).toBe('completed');
+    expect(prescriptionsTableRows[0].status).toEqual({
+      dominantState: 'completed',
+      total: 1,
+      actionableCount: 0,
+    });
     expect(prescriptionsTableRows[0].location).toBe('CDI Klinik Ekstèn Jeneral');
     expect(prescriptionsTableRows[1].id).toBe('8be2352d-c10d-4111-ac01-0ccada4c54d2');
     expect(prescriptionsTableRows[1].created).toBe('2023-01-24T18:42:09-05:00');
@@ -650,7 +658,11 @@ describe('Medication Request Resource Test', () => {
     expect(prescriptionsTableRows[1].patient.name).toBe('Dylan, Bob (ZL EMR ID: Y2CK2G)');
     expect(prescriptionsTableRows[1].patient.uuid).toBe('558494fe-5850-4b34-a3bf-06550334ba4a');
     expect(prescriptionsTableRows[1].prescriber).toBe('Goodrich, Mark (Identifier: MAADH)');
-    expect(prescriptionsTableRows[1].status).toBe('expired');
+    expect(prescriptionsTableRows[1].status).toEqual({
+      dominantState: 'expired',
+      total: 1,
+      actionableCount: 1,
+    });
     expect(prescriptionsTableRows[1].location).toBeNull();
   });
 

@@ -23,7 +23,28 @@ import { type PharmacyConfig } from '../config-schema';
 import { type SimpleLocation } from '../types';
 import PatientInfoCell from '../patient/patient-info-cell.component';
 import PrescriptionExpanded from './prescription-expanded.component';
+import PrescriptionStatusCell from './prescription-status-cell.component';
 import styles from './prescriptions.scss';
+
+/**
+ * Several cells hold objects rather than strings (the patient and the status summary), which
+ * Carbon's default comparator would collapse to a single indistinguishable value. Reduce
+ * those to the text the cell actually shows so the columns stay sortable.
+ */
+function toSortableValue(cellValue: unknown): string {
+  if (cellValue && typeof cellValue === 'object') {
+    if ('dominantState' in cellValue) {
+      return String((cellValue as { dominantState: string }).dominantState);
+    }
+    if ('name' in cellValue) {
+      return String((cellValue as { name: string }).name ?? '');
+    }
+  }
+  if (cellValue == null) {
+    return '';
+  }
+  return typeof cellValue === 'string' || typeof cellValue === 'number' ? String(cellValue) : '';
+}
 
 interface PrescriptionsTableProps {
   loadData: boolean;
@@ -55,21 +76,16 @@ const PrescriptionsTable: React.FC<PrescriptionsTableProps> = ({
     locations,
     config.medicationRequestExpirationPeriodInDays,
     config.refreshInterval,
+    {
+      pauseButtonEnabled: config.actionButtons.pauseButton.enabled,
+      closeButtonEnabled: config.actionButtons.closeButton.enabled,
+    },
   );
 
   // reset back to page 1 whenever search term changes
   useEffect(() => {
     setPage(1);
   }, [debouncedSearchTerm]);
-
-  // dynamic status keys we need to maintain
-  // t('active', 'Active')
-  // t('paused', 'Paused')
-  // t('closed', 'Closed')
-  // t('completed', 'Completed')
-  // t('expired', 'Expired')
-  // t('cancelled', 'Cancelled')
-  // t('dispensed', 'Dispensed')
 
   let columns = [
     { header: t('created', 'Created'), key: 'created' },
@@ -102,7 +118,14 @@ const PrescriptionsTable: React.FC<PrescriptionsTableProps> = ({
       )}
       {prescriptionsTableRows && (
         <>
-          <DataTable rows={prescriptionsTableRows} headers={columns} isSortable>
+          <DataTable
+            rows={prescriptionsTableRows}
+            headers={columns}
+            isSortable
+            sortRow={(cellA, cellB, { sortDirection, sortStates }) => {
+              const comparison = toSortableValue(cellA).localeCompare(toSortableValue(cellB));
+              return sortDirection === sortStates.DESC ? -comparison : comparison;
+            }}>
             {({ rows, headers, getExpandHeaderProps, getHeaderProps, getRowProps, getTableProps }) => (
               <TableContainer>
                 <Table {...getTableProps()} useZebraStyles>
@@ -125,7 +148,7 @@ const PrescriptionsTable: React.FC<PrescriptionsTableProps> = ({
                               ) : cell.id.endsWith('patient') ? (
                                 <PatientInfoCell patient={cell.value} />
                               ) : cell.id.endsWith('status') ? (
-                                t(cell.value)
+                                <PrescriptionStatusCell summary={cell.value} />
                               ) : (
                                 cell.value
                               )}

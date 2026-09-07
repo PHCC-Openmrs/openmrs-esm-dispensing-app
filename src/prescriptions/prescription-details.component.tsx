@@ -4,7 +4,6 @@ import { WarningFilled } from '@carbon/react/icons';
 import { useTranslation } from 'react-i18next';
 import { type PatientUuid, useConfig, UserHasAccess } from '@openmrs/esm-framework';
 import {
-  computeMedicationRequestCombinedStatus,
   computeTotalQuantityDispensed,
   computeTotalQuantityOrdered,
   getConceptCodingDisplay,
@@ -12,13 +11,9 @@ import {
   useStaleEncounterUuids,
   getMostRecentMedicationDispenseStatus,
 } from '../utils';
+import { computePrescriptionState, PrescriptionState } from '../prescription-state';
 import { PRIVILEGE_CREATE_DISPENSE } from '../constants';
-import {
-  type AllergyIntolerance,
-  type MedicationRequestBundle,
-  MedicationRequestCombinedStatus,
-  MedicationDispenseStatus,
-} from '../types';
+import { type AllergyIntolerance, type MedicationRequestBundle, MedicationDispenseStatus } from '../types';
 import { type PharmacyConfig } from '../config-schema';
 import { usePatientAllergies, usePrescriptionDetails } from '../medication-request/medication-request.resource';
 import ActionButtons from '../components/action-buttons.component';
@@ -41,39 +36,33 @@ const PrescriptionDetails: React.FC<{
   const { medicationRequestBundles, error, isLoading } = usePrescriptionDetails(encounterUuid, config.refreshInterval);
   const { staleEncounterUuids } = useStaleEncounterUuids();
 
+  // the tag and the action buttons below it derive from the same state, so the tag can
+  // never describe a request as something its buttons disagree with
   const generateStatusTag = (medicationRequestBundle: MedicationRequestBundle): React.ReactNode => {
-    const combinedStatus: MedicationRequestCombinedStatus = computeMedicationRequestCombinedStatus(
-      medicationRequestBundle.request,
-      config.medicationRequestExpirationPeriodInDays,
-    );
+    const state = computePrescriptionState(medicationRequestBundle, {
+      medicationRequestExpirationPeriodInDays: config.medicationRequestExpirationPeriodInDays,
+    });
 
-    if (combinedStatus === MedicationRequestCombinedStatus.cancelled) {
-      return <Tag type="red">{t('cancelled', 'Cancelled')}</Tag>;
+    switch (state) {
+      case PrescriptionState.cancelled:
+        return <Tag type="red">{t('cancelled', 'Cancelled')}</Tag>;
+      case PrescriptionState.completed:
+        return <Tag type="green">{t('completed', 'Completed')}</Tag>;
+      case PrescriptionState.expired:
+        return <Tag type="red">{t('expired', 'Expired')}</Tag>;
+      case PrescriptionState.closed:
+        return <Tag type="red">{t('closed', 'Closed')}</Tag>;
+      case PrescriptionState.paused:
+        return <Tag type="red">{t('paused', 'Paused')}</Tag>;
     }
 
-    if (combinedStatus === MedicationRequestCombinedStatus.completed) {
-      return <Tag type="green">{t('completed', 'Completed')}</Tag>;
-    }
-
-    if (combinedStatus === MedicationRequestCombinedStatus.expired) {
-      return <Tag type="red">{t('expired', 'Expired')}</Tag>;
-    }
-
-    if (combinedStatus === MedicationRequestCombinedStatus.declined) {
-      return <Tag type="red">{t('closed', 'Closed')}</Tag>;
-    }
-
-    if (combinedStatus === MedicationRequestCombinedStatus.on_hold) {
-      return <Tag type="red">{t('paused', 'Paused')}</Tag>;
-    }
-
-    // If there is no combined status, but the last event was a dispense, display "dispensed"
+    // an active request that has already had medication handed over against it
     const mostRecentDispenseStatus = getMostRecentMedicationDispenseStatus(medicationRequestBundle.dispenses);
     if (mostRecentDispenseStatus === MedicationDispenseStatus.completed) {
       return <Tag type="gray">{t('dispensed', 'Dispensed')}</Tag>;
     }
 
-    return null;
+    return <Tag type="blue">{t('active', 'Active')}</Tag>;
   };
 
   const getDispensedProgress = (medicationRequestBundle: MedicationRequestBundle) => {

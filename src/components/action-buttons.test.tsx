@@ -2,8 +2,8 @@ import React from 'react';
 import { vi, describe, expect, test, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { useConfig, ExtensionSlot } from '@openmrs/esm-framework';
-import { computeMedicationRequestStatus, getMostRecentMedicationDispenseStatus } from '../utils';
-import { MedicationDispenseStatus, type MedicationRequest, MedicationRequestStatus } from '../types';
+import { type MedicationRequest, MedicationRequestStatus } from '../types';
+import { computePrescriptionState, getAvailableActions, PrescriptionAction } from '../prescription-state';
 import ActionButtons from './action-buttons.component';
 import CloseActionButton from './prescription-actions/close-action-button.component';
 import DispenseActionButton from './prescription-actions/dispense-action-button.component';
@@ -109,15 +109,17 @@ const medicationRequest: MedicationRequest = {
   },
 };
 
-const medicationRequestStatus = computeMedicationRequestStatus(medicationRequest, 90);
-const mostRecentMedicationDispenseStatus: MedicationDispenseStatus = getMostRecentMedicationDispenseStatus([]);
+const allButtonsEnabled = { pauseButtonEnabled: true, closeButtonEnabled: true };
+
+function actionsFor(request: MedicationRequest) {
+  const state = computePrescriptionState({ request, dispenses: [] }, { medicationRequestExpirationPeriodInDays: 90 });
+  return getAvailableActions(state, allButtonsEnabled);
+}
 
 const prescriptionActionsState = {
-  dispensable:
-    medicationRequestStatus === MedicationRequestStatus.active &&
-    mostRecentMedicationDispenseStatus !== MedicationDispenseStatus.declined,
-  pauseable: true,
-  closeable: true,
+  dispensable: actionsFor(medicationRequest).includes(PrescriptionAction.dispense),
+  pauseable: actionsFor(medicationRequest).includes(PrescriptionAction.pause),
+  closeable: actionsFor(medicationRequest).includes(PrescriptionAction.close),
   quantityRemaining: 0,
   quantityDispensed: 0,
   patientUuid: mockPatientUuid,
@@ -180,16 +182,15 @@ describe('Action Buttons Component tests', () => {
       },
     };
 
-    // Recalculate status with expired medication
-    const expiredMedicationRequestStatus = computeMedicationRequestStatus(expiredMedicationRequest, 90);
-    const mostRecentDispenseStatus = getMostRecentMedicationDispenseStatus([]);
+    // Recalculate the available actions for the expired medication
+    const expiredActions = actionsFor(expiredMedicationRequest);
 
     // Create new state with expired medication
     const expiredPrescriptionActionsState = {
       ...prescriptionActionsState,
-      dispensable:
-        expiredMedicationRequestStatus === MedicationRequestStatus.active &&
-        mostRecentDispenseStatus !== MedicationDispenseStatus.declined,
+      dispensable: expiredActions.includes(PrescriptionAction.dispense),
+      pauseable: expiredActions.includes(PrescriptionAction.pause),
+      closeable: expiredActions.includes(PrescriptionAction.close),
       medicationRequestBundle: {
         request: expiredMedicationRequest,
         dispenses: [],

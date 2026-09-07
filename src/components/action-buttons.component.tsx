@@ -1,12 +1,8 @@
 import React from 'react';
 import { ExtensionSlot, useConfig, useSession } from '@openmrs/esm-framework';
-import { MedicationDispenseStatus, type MedicationRequestBundle, MedicationRequestStatus } from '../types';
-import {
-  computeMedicationRequestStatus,
-  computeQuantityRemaining,
-  getMostRecentMedicationDispenseStatus,
-  computeTotalQuantityDispensed,
-} from '../utils';
+import { type MedicationRequestBundle } from '../types';
+import { computeQuantityRemaining, computeTotalQuantityDispensed } from '../utils';
+import { computePrescriptionState, getAvailableActions, PrescriptionAction } from '../prescription-state';
 import { type PharmacyConfig } from '../config-schema';
 import { useProviders } from '../medication-dispense/medication-dispense.resource';
 import styles from './action-buttons.scss';
@@ -27,27 +23,19 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
   const config = useConfig<PharmacyConfig>();
   const session = useSession();
   const providers = useProviders(config.dispenserProviderRoles);
-  const mostRecentMedicationDispenseStatus: MedicationDispenseStatus = getMostRecentMedicationDispenseStatus(
-    medicationRequestBundle.dispenses,
-  );
-  const medicationRequestStatus = computeMedicationRequestStatus(
-    medicationRequestBundle.request,
-    config.medicationRequestExpirationPeriodInDays,
-  );
-  const dispensable =
-    medicationRequestStatus === MedicationRequestStatus.active &&
-    mostRecentMedicationDispenseStatus !== MedicationDispenseStatus.declined;
+  // button visibility comes entirely from the state -> action table in prescription-state.ts,
+  // so it can never disagree with the state tag rendered next to these buttons
+  const state = computePrescriptionState(medicationRequestBundle, {
+    medicationRequestExpirationPeriodInDays: config.medicationRequestExpirationPeriodInDays,
+  });
+  const availableActions = getAvailableActions(state, {
+    pauseButtonEnabled: config.actionButtons.pauseButton.enabled,
+    closeButtonEnabled: config.actionButtons.closeButton.enabled,
+  });
 
-  const pauseable =
-    config.actionButtons.pauseButton.enabled &&
-    medicationRequestStatus === MedicationRequestStatus.active &&
-    mostRecentMedicationDispenseStatus !== MedicationDispenseStatus.on_hold &&
-    mostRecentMedicationDispenseStatus !== MedicationDispenseStatus.declined;
-
-  const closeable =
-    config.actionButtons.closeButton.enabled &&
-    medicationRequestStatus === MedicationRequestStatus.active &&
-    mostRecentMedicationDispenseStatus !== MedicationDispenseStatus.declined;
+  const dispensable = availableActions.includes(PrescriptionAction.dispense);
+  const pauseable = availableActions.includes(PrescriptionAction.pause);
+  const closeable = availableActions.includes(PrescriptionAction.close);
 
   let quantityRemaining = null;
   if (config.dispenseBehavior.restrictTotalQuantityDispensed) {
@@ -60,6 +48,8 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
   }
 
   const prescriptionActionsState = {
+    state,
+    availableActions,
     dispensable,
     pauseable,
     closeable,

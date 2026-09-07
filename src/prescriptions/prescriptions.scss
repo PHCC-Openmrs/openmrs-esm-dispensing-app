@@ -150,3 +150,9 @@
 .paginationContainer {
   width: 100%;
 }
+
+.statusDetail {
+  color: $text-02;
+  display: block;
+  @include type.type-style('label-01');
+}

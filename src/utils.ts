@@ -1,4 +1,3 @@
-import dayjs from 'dayjs';
 import template from 'lodash/template';
 import { type useSWRConfig } from 'swr';
 import {
@@ -11,7 +10,6 @@ import {
   type MedicationReferenceOrCodeableConcept,
   type MedicationRequest,
   type MedicationRequestBundle,
-  MedicationRequestCombinedStatus,
   MedicationRequestFulfillerStatus,
   MedicationRequestStatus,
   type Quantity,
@@ -74,78 +72,6 @@ export function computeFulfillerStatus(
   return null;
 }
 /**
- * Within the UI, the "status" of a request we want to display to the pharmacist is
- * a combination of the status and the fulfiller statuts; given a request
- * this calculates the actual status we want to display to the pharmacist
- *
- * @param medicationRequests
- * @param medicationRequestExpirationPeriodInDays
- */
-export function computeMedicationRequestCombinedStatus(
-  medicationRequest: MedicationRequest,
-  medicationRequestExpirationPeriondInDays: number,
-): MedicationRequestCombinedStatus {
-  const medicationRequestStatus: MedicationRequestStatus = computeMedicationRequestStatus(
-    medicationRequest,
-    medicationRequestExpirationPeriondInDays,
-  );
-  const medicationRequestFulfillerStatus: MedicationRequestFulfillerStatus = getFulfillerStatus(medicationRequest);
-
-  // if the request is no longer active, that status takes precedent
-  if (medicationRequestStatus !== MedicationRequestStatus.active) {
-    if (medicationRequestStatus === MedicationRequestStatus.expired) {
-      return MedicationRequestCombinedStatus.expired;
-    } else if (medicationRequestStatus === MedicationRequestStatus.completed) {
-      return MedicationRequestCombinedStatus.completed;
-    } else if (medicationRequestStatus === MedicationRequestStatus.cancelled) {
-      return MedicationRequestCombinedStatus.cancelled;
-    }
-  }
-  // otherwise, if the medication dispense status is paused or closed, return that
-  if (medicationRequestFulfillerStatus === MedicationRequestFulfillerStatus.declined) {
-    return MedicationRequestCombinedStatus.declined;
-  } else if (medicationRequestFulfillerStatus === MedicationRequestFulfillerStatus.on_hold) {
-    return MedicationRequestCombinedStatus.on_hold;
-  }
-
-  // otherwise, return active
-  return MedicationRequestCombinedStatus.active;
-}
-
-/**
- * Calculates the status of a medication request given the request and the expiration period in days
- * Necessary to handle the (admittedly confusing) fact that the Dispense ESMs idea of "expired" is different
- * from that of the OpenMRS Backend, see logic below
- *
- * @param medicationRequests
- * @param medicationRequestExpirationPeriodInDays
- */
-export function computeMedicationRequestStatus(
-  medicationRequest: MedicationRequest,
-  medicationRequestExpirationPeriodInDays: number,
-): MedicationRequestStatus {
-  if (
-    medicationRequest.status === MedicationRequestStatus.cancelled ||
-    medicationRequest.status === MedicationRequestStatus.completed
-  ) {
-    return medicationRequest.status;
-  }
-
-  // expired is not based on based actual medication request expired status, but calculated from our configurable expiration period in days
-  // NOTE: the assumption here is that the validityPeriod.start is equal to encounter datetime of the associated encounter, because we use the encounter date when doing backend querying
-  if (
-    medicationRequest.dispenseRequest?.validityPeriod?.start &&
-    dayjs(medicationRequest.dispenseRequest.validityPeriod.start).isBefore(
-      dayjs().startOf('day').subtract(medicationRequestExpirationPeriodInDays, 'day'),
-    )
-  ) {
-    return MedicationRequestStatus.expired;
-  }
-
-  return MedicationRequestStatus.active;
-}
-
-/**
  * Captures the logic to compute the new fulfiller status after a dispense event, where dispense event = a medication dispense where medication is actually dispensed (as opposed one with status "on_hold" or "declined")
  *
  * @param medicationDispense the medication dispense being added or editing
@@ -200,76 +126,6 @@ export function computeNewFulfillerStatusAfterDelete(
     restrictTotalQuantityDispensed,
     deletedMedicationDispense.status === MedicationDispenseStatus.completed,
   );
-}
-
-/**
- * Given a set of medication requests, calculates the "combined" status (see computeMedicationRequestCombinedStatus)
- * of each, and then, from those determines the overall status of the "prescription" (where "prescription"
- * means all medication requests in a single encounter)
- * @param medicationRequests
- * @param medicationRequestExpirationPeriodInDays
- */
-export function computePrescriptionStatus(
-  medicationRequests: Array<MedicationRequest>,
-  medicationRequestExpirationPeriodInDays: number,
-): MedicationRequestCombinedStatus {
-  if (!medicationRequests || medicationRequests.length === 0) {
-    return null;
-  }
-
-  const medicationRequestCombinedStatuses: Array<MedicationRequestCombinedStatus> = medicationRequests.map(
-    (medicationRequest) =>
-      computeMedicationRequestCombinedStatus(medicationRequest, medicationRequestExpirationPeriodInDays),
-  );
-
-  if (medicationRequestCombinedStatuses.includes(MedicationRequestCombinedStatus.active)) {
-    return MedicationRequestCombinedStatus.active;
-  } else if (medicationRequestCombinedStatuses.includes(MedicationRequestCombinedStatus.on_hold)) {
-    return MedicationRequestCombinedStatus.on_hold;
-  } else if (medicationRequestCombinedStatuses.includes(MedicationRequestCombinedStatus.completed)) {
-    return MedicationRequestCombinedStatus.completed;
-  } else if (medicationRequestCombinedStatuses.includes(MedicationRequestCombinedStatus.declined)) {
-    return MedicationRequestCombinedStatus.declined;
-  } else if (medicationRequestCombinedStatuses.includes(MedicationRequestCombinedStatus.cancelled)) {
-    return MedicationRequestCombinedStatus.cancelled;
-  } else if (medicationRequestCombinedStatuses.includes(MedicationRequestCombinedStatus.expired)) {
-    return MedicationRequestCombinedStatus.expired;
-  }
-
-  return null;
-}
-
-/**
- * Calculates the prescription status and then returns the actual message code we want to display to the end user
- *
- * @param medicationRequests
- * @param medicationRequestExpirationPeriodInDays
- */
-export function computePrescriptionStatusMessageCode(
-  medicationRequests: Array<MedicationRequest>,
-  medicationRequestExpirationPeriodInDays: number,
-): string {
-  const medicationRequestCombinedStatus: MedicationRequestCombinedStatus = computePrescriptionStatus(
-    medicationRequests,
-    medicationRequestExpirationPeriodInDays,
-  );
-
-  if (medicationRequestCombinedStatus === null) {
-    return null;
-  } else if (medicationRequestCombinedStatus === MedicationRequestCombinedStatus.active) {
-    return 'active';
-  } else if (medicationRequestCombinedStatus === MedicationRequestCombinedStatus.on_hold) {
-    return 'paused';
-  } else if (medicationRequestCombinedStatus === MedicationRequestCombinedStatus.completed) {
-    return 'completed';
-  } else if (medicationRequestCombinedStatus === MedicationRequestCombinedStatus.declined) {
-    return 'closed';
-  } else if (medicationRequestCombinedStatus === MedicationRequestCombinedStatus.expired) {
-    return 'expired';
-  } else if (medicationRequestCombinedStatus === MedicationRequestCombinedStatus.cancelled) {
-    return 'cancelled';
-  }
-  return null;
 }
 
 export function computeQuantityRemaining(medicationRequestBundle: MedicationRequestBundle): number {

@@ -22,6 +22,8 @@
   "configurationError": "Configuration error",
   "couldNotDeleteMedicationDispense": "Could not delete medication dispense",
   "couldNotUpdateMedicationRequestStatus": "Could not update medication request status",
+  "countItems": "{{total}} items",
+  "countNeedAction": "{{actionableCount}} of {{total}} need action",
   "created": "Created",
   "createOrderWithoutDispensing": "Create order without dispensing",
   "datePrescribed": "Date prescribed",

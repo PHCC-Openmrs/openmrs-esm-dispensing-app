@@ -21,9 +21,13 @@ import {
   getMedicationReferenceOrCodeableConcept,
   getPrescriptionTableEndpoint,
   sortMedicationDispensesByWhenHandedOver,
-  computePrescriptionStatusMessageCode,
   getAssociatedMedicationDispenses,
 } from '../utils';
+import {
+  type ActionAvailabilityOptions,
+  computePrescriptionState,
+  summarizePrescriptionStates,
+} from '../prescription-state';
 
 export function usePrescriptionsTable(
   loadData: boolean,
@@ -35,6 +39,7 @@ export function usePrescriptionsTable(
   locations: SimpleLocation[] = [],
   medicationRequestExpirationPeriodInDays: number,
   refreshInterval: number,
+  actionOptions: ActionAvailabilityOptions,
 ) {
   const { data, error } = useSWR<{ data: EncounterResponse }, Error>(
     loadData
@@ -82,6 +87,7 @@ export function usePrescriptionsTable(
           medicationRequestsForEncounter,
           medicationDispensesForMedicationRequests,
           medicationRequestExpirationPeriodInDays,
+          actionOptions,
         );
       });
       prescriptionsTableRows.sort((a, b) => (a.created < b.created ? 1 : -1));
@@ -103,7 +109,21 @@ function buildPrescriptionsTableRow(
   medicationRequests: Array<MedicationRequest>,
   medicationDispense: Array<MedicationDispense>,
   medicationRequestExpirationPeriodInDays: number,
+  actionOptions: ActionAvailabilityOptions,
 ): PrescriptionsTableRow {
+  // each request is paired with its own dispenses so the row summary sees the same
+  // evidence the expanded rows do; previously the dispenses fetched here were dropped
+  // and the summary relied solely on the request's fulfiller status extension
+  const states = medicationRequests.map((medicationRequest) =>
+    computePrescriptionState(
+      {
+        request: medicationRequest,
+        dispenses: getAssociatedMedicationDispenses(medicationRequest, medicationDispense) ?? [],
+      },
+      { medicationRequestExpirationPeriodInDays },
+    ),
+  );
+
   return {
     id: encounter?.id,
     created: encounter?.period?.start,
@@ -123,7 +143,7 @@ function buildPrescriptionsTableRow(
     lastDispenser:
       medicationDispense && medicationDispense[0]?.performer && medicationDispense[0]?.performer[0]?.actor.display,
     prescriber: [...new Set(medicationRequests.map((o) => o.requester.display))].join(', '),
-    status: computePrescriptionStatusMessageCode(medicationRequests, medicationRequestExpirationPeriodInDays),
+    status: summarizePrescriptionStates(states, actionOptions),
     location: encounter?.location ? encounter?.location[0]?.location.display : null,
   };
 }

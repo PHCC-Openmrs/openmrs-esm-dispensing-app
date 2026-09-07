@@ -37,6 +37,10 @@ describe('PrescriptionTabPanel', () => {
       },
       medicationRequestExpirationPeriodInDays: 90,
       refreshInterval: 10000,
+      actionButtons: {
+        pauseButton: { enabled: true },
+        closeButton: { enabled: true },
+      },
     });
 
     render(<PrescriptionTabPanel isTabActive={true} locations={descendantLocations} isLocationsLoading={false} />);
@@ -54,6 +58,10 @@ describe('PrescriptionTabPanel', () => {
       },
       medicationRequestExpirationPeriodInDays: 90,
       refreshInterval: 10000,
+      actionButtons: {
+        pauseButton: { enabled: true },
+        closeButton: { enabled: true },
+      },
     });
 
     render(<PrescriptionTabPanel isTabActive={true} locations={descendantLocations} isLocationsLoading={false} />);
