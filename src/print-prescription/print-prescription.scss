@@ -22,14 +22,47 @@
 
   @media print {
     background-color: colors.$white;
-    height: 100vh;
-    padding: 0;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    min-height: 100vh;
+    padding: layout.$spacing-05 layout.$spacing-07;
   }
 }
 
 .printoutTitle {
   @include type.type-style('heading-03');
   text-align: center;
+  font-weight: bold;
+}
+
+.careLogo {
+  display: block;
+  margin: 0 auto layout.$spacing-03 auto;
+  height: 2.5rem;
+  width: auto;
+}
+
+.patientInfoGrid {
+  margin: layout.$spacing-05 0;
+  padding: layout.$spacing-03 0;
+  border-top: 1px solid colors.$gray-20;
+  border-bottom: 1px solid colors.$gray-20;
+}
+
+.patientInfoRow {
+  display: flex;
+  justify-content: space-between;
+  gap: layout.$spacing-05;
+  color: colors.$black;
+  @include type.type-style('body-compact-01');
+
+  p {
+    margin: layout.$spacing-02 0;
+  }
+}
+
+.infoLabel {
   font-weight: bold;
 }
 
@@ -52,11 +85,6 @@
   gap: layout.$spacing-05;
   padding: 0 layout.$spacing-05 0 layout.$spacing-05;
   justify-content: space-between;
-}
-
-.patientName {
-  text-transform: capitalize;
-  text-align: center;
 }
 
 .printPreviewContainer {

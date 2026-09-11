@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { useTranslation } from 'react-i18next';
 import {
@@ -10,7 +10,7 @@ import {
   ModalFooter,
   ModalHeader,
 } from '@carbon/react';
-import { ErrorState, getCoreTranslation } from '@openmrs/esm-framework';
+import { ErrorState, getCoreTranslation, usePatient } from '@openmrs/esm-framework';
 import { usePrescriptionDetails } from '../medication-request/medication-request.resource';
 import PrescriptionsPrintout from './prescription-printout.component';
 import PrintablePrescriptionsSelector from './printable-prescriptions.component';
@@ -23,16 +23,23 @@ type PrescriptionPrintPreviewModalProps = {
   status: string;
 };
 
-const PrescriptionPrintPreviewModal: React.FC<PrescriptionPrintPreviewModalProps> = ({ onClose, encounterUuid }) => {
+const PrescriptionPrintPreviewModal: React.FC<PrescriptionPrintPreviewModalProps> = ({
+  onClose,
+  encounterUuid,
+  patientUuid,
+}) => {
   const { t } = useTranslation();
   const { medicationRequestBundles, error, isLoading } = usePrescriptionDetails(encounterUuid);
+  const { patient, isLoading: isLoadingPatient } = usePatient(patientUuid);
 
   const [excludedPrescriptions, setExcludedPrescriptions] = useState<string[]>([]);
   const [printError, setPrintError] = useState<string | null>(null);
   const componentRef = useRef<HTMLDivElement>(null);
+  const hasAutoPrinted = useRef(false);
 
   const handlePrint = useReactToPrint({
     content: () => componentRef.current,
+    documentTitle: t('prescriptionInstructions', 'Prescription instructions'),
     onBeforeGetContent: () => {
       setPrintError(null);
     },
@@ -41,6 +48,21 @@ const PrescriptionPrintPreviewModal: React.FC<PrescriptionPrintPreviewModalProps
     },
     copyStyles: true,
   });
+
+  // Fire the browser print dialog as soon as the prescription AND the patient record
+  // are both ready, so printing a prescription feels like the one-click "Print this
+  // encounter" action elsewhere in the app. Waiting on the patient fetch too (not just
+  // the prescription fetch) matters because they're independent requests -- printing
+  // as soon as only the prescription resolves can fire before the patient details
+  // (gender/age/national ID/phone) have loaded, capturing a printout with just the name.
+  // The Print button in the footer stays available to re-trigger it after changing
+  // which medications are excluded.
+  useEffect(() => {
+    if (!isLoading && !isLoadingPatient && !error && medicationRequestBundles?.length > 0 && !hasAutoPrinted.current) {
+      hasAutoPrinted.current = true;
+      handlePrint();
+    }
+  }, [isLoading, isLoadingPatient, error, medicationRequestBundles, handlePrint]);
 
   return (
     <>
@@ -67,6 +89,7 @@ const PrescriptionPrintPreviewModal: React.FC<PrescriptionPrintPreviewModalProps
               <PrescriptionsPrintout
                 excludedPrescription={excludedPrescriptions}
                 medicationRequests={medicationRequestBundles}
+                patient={patient}
               />
             </div>
           </div>
