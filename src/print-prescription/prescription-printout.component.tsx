@@ -1,8 +1,7 @@
 import React, { useMemo } from 'react';
-import classNames from 'classnames';
 import { useTranslation } from 'react-i18next';
 import { Layer, StructuredListBody, StructuredListCell, StructuredListRow, StructuredListWrapper } from '@carbon/react';
-import { formatDate, parseDate, useSession } from '@openmrs/esm-framework';
+import { age, formatDate, parseDate, useSession, type NullablePatient } from '@openmrs/esm-framework';
 import { type DosageInstruction, type MedicationRequestBundle, type Quantity } from '../types';
 import {
   getDosageInstruction,
@@ -11,21 +10,39 @@ import {
   getQuantity,
   getRefillsAllowed,
 } from '../utils';
+import careLogo from '../assets/care-logo.png';
 import styles from './print-prescription.scss';
 
 type PrescriptionsPrintoutProps = {
   excludedPrescription: Array<string>;
   medicationRequests: Array<MedicationRequestBundle>;
+  patient?: NullablePatient;
 };
 
-const PrescriptionsPrintout: React.FC<PrescriptionsPrintoutProps> = ({ excludedPrescription, medicationRequests }) => {
+const PrescriptionsPrintout: React.FC<PrescriptionsPrintoutProps> = ({
+  excludedPrescription,
+  medicationRequests,
+  patient,
+}) => {
   const { t } = useTranslation();
   const {
     sessionLocation: { display: facilityName },
   } = useSession();
-  const patient = medicationRequests[0]?.request?.subject;
+  const subject = medicationRequests[0]?.request?.subject;
 
   const extractPatientName = (display: string) => (display.includes('(') ? display.split('(')[0] : display);
+
+  const nationalId = patient?.identifier?.find(
+    (identifier) =>
+      identifier.type?.text === 'National ID' ||
+      identifier.type?.coding?.some((coding) => coding.display === 'National ID'),
+  )?.value;
+
+  const phoneNumber = patient?.telecom?.find((contact) => contact.system === 'phone')?.value;
+
+  const patientGender = patient?.gender ? patient.gender.charAt(0).toUpperCase() + patient.gender.slice(1) : null;
+
+  const patientAge = patient?.birthDate ? age(patient.birthDate) : null;
 
   const requesters = useMemo(() => {
     const uniqueRequesters = new Set<string>();
@@ -49,16 +66,55 @@ const PrescriptionsPrintout: React.FC<PrescriptionsPrintoutProps> = ({ excludedP
         <StructuredListBody>
           <StructuredListRow head>
             <StructuredListCell head>
-              <br />
-              <br />
+              <img src={careLogo} alt="CARE logo" className={styles.careLogo} />
               <p className={styles.printoutTitle}>{t('prescriptionInstructions', 'Prescription instructions')}</p>
-              {patient && (
-                <p className={classNames(styles.patientName, styles.faintText)}>
-                  {extractPatientName(patient.display)}
-                </p>
+              {(subject || patientGender || patientAge || nationalId || phoneNumber) && (
+                <div className={styles.patientInfoGrid}>
+                  <div className={styles.patientInfoRow}>
+                    {subject && (
+                      <p>
+                        <span className={styles.infoLabel}>{t('patientName', 'Patient Name')}</span>
+                        {': '}
+                        {extractPatientName(subject.display)}
+                      </p>
+                    )}
+                    {nationalId && (
+                      <p>
+                        <span className={styles.infoLabel}>{t('nationalId', 'National ID')}</span>
+                        {': '}
+                        {nationalId}
+                      </p>
+                    )}
+                  </div>
+                  {(patientGender || patientAge || phoneNumber) && (
+                    <div className={styles.patientInfoRow}>
+                      <div>
+                        {patientGender && (
+                          <p>
+                            <span className={styles.infoLabel}>{t('gender', 'Gender')}</span>
+                            {': '}
+                            {patientGender}
+                          </p>
+                        )}
+                        {patientAge && (
+                          <p>
+                            <span className={styles.infoLabel}>{t('age', 'Age')}</span>
+                            {': '}
+                            {patientAge}
+                          </p>
+                        )}
+                      </div>
+                      {phoneNumber && (
+                        <p>
+                          <span className={styles.infoLabel}>{t('phoneNumber', 'Phone number')}</span>
+                          {': '}
+                          {phoneNumber}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
-              <br />
-              <br />
             </StructuredListCell>
           </StructuredListRow>
           {filteredRequests.map((request) => {
