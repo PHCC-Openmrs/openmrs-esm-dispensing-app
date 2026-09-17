@@ -103,6 +103,12 @@ export const configSchema = {
         "If true, limits prescriptions shown to locations that are descendants of the current login location's nearest ancestor tagged as a visit location. Requires the EMR API module to be installed.",
       _default: false,
     },
+    restrictToSessionLocation: {
+      _type: Type.Boolean,
+      _description:
+        "If true, only prescriptions ordered at the user's login location are shown, and the location filter dropdown is hidden so the restriction cannot be lifted. Takes precedence over locationFilter and restrictToVisitLocationDescendants.",
+      _default: false,
+    },
   },
   refreshInterval: {
     _type: Type.Number,
@@ -207,6 +213,7 @@ export interface PharmacyConfig {
       associatedPharmacyLocationAttribute: string;
     };
     restrictToVisitLocationDescendants: boolean;
+    restrictToSessionLocation: boolean;
   };
   valueSets: {
     reasonForPause: {

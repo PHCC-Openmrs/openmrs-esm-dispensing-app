@@ -38,6 +38,7 @@ const pharmacyConfig: PharmacyConfig = {
       associatedPharmacyLocationAttribute: 'Associated Pharmacy Location',
     },
     restrictToVisitLocationDescendants: false,
+    restrictToSessionLocation: false,
   },
   refreshInterval: 10000,
   medicationRequestExpirationPeriodInDays: 0,
@@ -188,6 +189,47 @@ describe('useLocations', () => {
       expect(locations[1].id).toBe('loc-1');
       expect(locations[1].name).toBe('KGH Triage');
       expect(locations[1].associatedPharmacyLocation).toBe(null);
+    });
+  });
+
+  describe('when restrictToSessionLocation is true', () => {
+    const sessionLocationConfig: PharmacyConfig = {
+      ...pharmacyConfig,
+      locationBehavior: {
+        ...pharmacyConfig.locationBehavior,
+        // takes precedence, so turn the other options on to prove they're ignored
+        locationFilter: { ...pharmacyConfig.locationBehavior.locationFilter, enabled: true },
+        restrictToVisitLocationDescendants: true,
+        restrictToSessionLocation: true,
+      },
+    };
+
+    it('returns only the login location, without querying the backend', () => {
+      mockUseFeatureFlag.mockReturnValue(true);
+      // @ts-ignore
+      mockUseSession.mockReturnValue({ sessionLocation: { uuid: 'session-location-uuid', display: 'Pharmacy A' } });
+      // @ts-ignore
+      useSWR.mockReturnValue({ data: null });
+
+      const { result } = renderHook(() => useLocations(sessionLocationConfig));
+
+      expect(result.current.locations).toEqual([
+        { id: 'session-location-uuid', name: 'Pharmacy A', associatedPharmacyLocation: null },
+      ]);
+      expect(result.current.isLoading).toBe(false);
+      expect(useSWR).toHaveBeenCalledWith(null, openmrsFetch);
+    });
+
+    it('stays loading while the session location is unknown, so callers do not query unfiltered', () => {
+      // @ts-ignore
+      mockUseSession.mockReturnValue({});
+      // @ts-ignore
+      useSWR.mockReturnValue({ data: null });
+
+      const { result } = renderHook(() => useLocations(sessionLocationConfig));
+
+      expect(result.current.locations).toEqual([]);
+      expect(result.current.isLoading).toBe(true);
     });
   });
 });

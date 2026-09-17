@@ -69,4 +69,45 @@ describe('PrescriptionTabPanel', () => {
     const [, , , , , , locationsPassedToFetch] = mockUsePrescriptionsTable.mock.lastCall;
     expect(locationsPassedToFetch).toEqual([]);
   });
+
+  describe('when restrictToSessionLocation is true', () => {
+    const sessionLocation: SimpleLocation[] = [
+      { id: 'session-uuid', name: 'KGH Pharmacy', associatedPharmacyLocation: null },
+    ];
+
+    beforeEach(() => {
+      mockUseConfig.mockReturnValue({
+        locationBehavior: {
+          locationColumn: { enabled: false },
+          locationFilter: { enabled: true, tag: 'Login Location' },
+          restrictToVisitLocationDescendants: false,
+          restrictToSessionLocation: true,
+        },
+        medicationRequestExpirationPeriodInDays: 90,
+        refreshInterval: 10000,
+        actionButtons: {
+          pauseButton: { enabled: true },
+          closeButton: { enabled: true },
+        },
+      });
+    });
+
+    it('restricts the data fetch to the login location and hides the location filter', () => {
+      const { queryByLabelText } = render(
+        <PrescriptionTabPanel isTabActive={true} locations={sessionLocation} isLocationsLoading={false} />,
+      );
+
+      const [loadData, , , , , , locationsPassedToFetch] = mockUsePrescriptionsTable.mock.lastCall;
+      expect(loadData).toBe(true);
+      expect(locationsPassedToFetch).toEqual(sessionLocation);
+      expect(queryByLabelText('Filter by locations')).not.toBeInTheDocument();
+    });
+
+    it('does not fetch until the login location is known', () => {
+      render(<PrescriptionTabPanel isTabActive={true} locations={[]} isLocationsLoading={true} />);
+
+      const [loadData] = mockUsePrescriptionsTable.mock.lastCall;
+      expect(loadData).toBe(false);
+    });
+  });
 });
