@@ -71,6 +71,8 @@
   "expired": "Expired",
   "fillPrescription": "Fill prescription",
   "fillPrescriptionForPatient": "Fill prescription for patient",
+  "fillsRemaining": "Fills remaining",
+  "fillsRemainingOfTotal": "{{remaining}} of {{total}}",
   "filterByLocations": "Filter by locations",
   "for": "for",
   "freeTextDosage": "Free text dosage",

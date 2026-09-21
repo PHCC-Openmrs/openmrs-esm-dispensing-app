@@ -50,13 +50,13 @@ export const configSchema = {
       _type: Type.Boolean,
       _description:
         'Enable/Disable editing the prescription. If Disabled, Quantity will be he only editable field on prescription form. Note that this means that quantity units will need to be mandatory and set correctly on the prescription.',
-      _default: true,
+      _default: false,
     },
     restrictTotalQuantityDispensed: {
       _type: Type.Boolean,
       _description:
         'Enable/Disable restricting dispensing quantity greater than total quantity ordered. Marks prescription as complete when total quantity dispensed. If true, allowModifyingPrescription *must* be false, as this functionality relies solely on numeric quantity and assumes no change in formulation, dosage, unit, etc',
-      _default: false,
+      _default: true,
     },
   },
   dispenserProviderRoles: {
@@ -170,8 +170,8 @@ export const configSchema = {
   completeOrderWithThisDispense: {
     _type: Type.Boolean,
     _description:
-      'Enable or disable automatically marking an order as complete/closed whenever any dispense is recorded against it, regardless of whether the full ordered quantity was dispensed.',
-    _default: true,
+      'Enable or disable automatically marking an order as complete/closed whenever any dispense is recorded against it, regardless of whether the full ordered quantity was dispensed. Leave disabled when refills are in use, otherwise the first fill closes the order and the remaining fills can never be dispensed.',
+    _default: false,
   },
   customTabs: {
     _type: Type.Array,
