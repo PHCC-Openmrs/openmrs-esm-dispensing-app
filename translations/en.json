@@ -61,8 +61,6 @@
   "editPauseRecord": "Edit Pause Record",
   "editRecord": "Edit Record",
   "error": "Error",
-  "errorDispensingMedication": "Error dispensing medication",
-  "errorDispensingMedicationMessage": "{{medication}}: {{error}}",
   "errorLoadingAllergies": "Error loading allergies",
   "errorLoadingHistory": "Error loading history",
   "errorLoadingInventoryItems": "Error fetching inventory items",
