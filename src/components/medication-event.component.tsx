@@ -24,7 +24,18 @@ const MedicationEvent: React.FC<{
   isDispenseEvent?: boolean;
   quantityDispensed?: number;
   totalQuantityOrdered?: number;
-}> = ({ medicationEvent, status = null, children, isDispenseEvent, quantityDispensed, totalQuantityOrdered }) => {
+  fillsRemaining?: number;
+  totalFills?: number;
+}> = ({
+  medicationEvent,
+  status = null,
+  children,
+  isDispenseEvent,
+  quantityDispensed,
+  totalQuantityOrdered,
+  fillsRemaining,
+  totalFills,
+}) => {
   const { t } = useTranslation();
   const dosageInstruction = getDosageInstruction(medicationEvent.dosageInstruction);
   const isFreeTextDosage = calculateIsFreeTextDosage(dosageInstruction);
@@ -96,6 +107,21 @@ const MedicationEvent: React.FC<{
           <p className={styles.bodyLong01}>
             <span className={styles.label01}>{t('refills', 'Refills').toUpperCase()}</span>{' '}
             <span className={styles.refills}>{refillsAllowed}</span>
+          </p>
+        )}
+
+        {/* counts whole fills, so an order with 2 refills reads "3" before anything is dispensed
+            and "2" once the first fill is handed over - the refills line above is the prescriber's
+            repeat count and deliberately stays put */}
+        {fillsRemaining != null && totalFills != null && (
+          <p className={styles.bodyLong01}>
+            <span className={styles.label01}>{t('fillsRemaining', 'Fills remaining').toUpperCase()}</span>{' '}
+            <span className={styles.refills}>
+              {t('fillsRemainingOfTotal', '{{remaining}} of {{total}}', {
+                remaining: fillsRemaining,
+                total: totalFills,
+              })}
+            </span>
           </p>
         )}
         {dosageInstruction?.text && <p className={styles.bodyLong01}>{dosageInstruction.text}</p>}

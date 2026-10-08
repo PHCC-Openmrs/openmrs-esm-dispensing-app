@@ -358,7 +358,6 @@ const MedicationDispenseReview: React.FC<MedicationDispenseReviewProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>{t('quantity', 'Quantity')}</div>
             }
             min={0}
-            max={config.dispenseBehavior.restrictTotalQuantityDispensed ? quantityRemaining : undefined}
             onChange={(event, state) => {
               updateMedicationDispense({
                 quantity: {

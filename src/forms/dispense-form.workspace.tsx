@@ -12,27 +12,20 @@ import {
   Workspace2,
   type Workspace2DefinitionProps,
 } from '@openmrs/esm-framework';
-import {
-  type MedicationDispense,
-  MedicationDispenseStatus,
-  type MedicationRequestBundle,
-  type InventoryItem,
-  MedicationRequestFulfillerStatus,
-} from '../types';
-import {
-  calculateIsFreeTextDosage,
-  computeNewFulfillerStatusAfterDispenseEvent,
-  getDosageInstruction,
-  getFulfillerStatus,
-  getUuidFromReference,
-  markEncounterAsStale,
-  revalidate,
-} from '../utils';
+import { type MedicationDispense, type MedicationRequestBundle, type InventoryItem } from '../types';
+import { calculateIsFreeTextDosage, getDosageInstruction, markEncounterAsStale, revalidate } from '../utils';
 import { type PharmacyConfig } from '../config-schema';
 import { notifyIfPrescriptionFulfillmentComplete } from '../pharmacy-queue-notification';
-import { createStockDispenseRequestPayload, sendStockDispenseRequest } from './stock-dispense/stock.resource';
-import { saveMedicationDispense } from '../medication-dispense/medication-dispense.resource';
-import { updateMedicationRequestFulfillerStatus } from '../medication-request/medication-request.resource';
+import {
+  allocateQuantityAcrossBatches,
+  createStockDispenseRequestPayload,
+  sendStockDispenseRequest,
+} from './stock-dispense/stock.resource';
+import {
+  completeMedicationDispense,
+  findDuplicateDispense,
+  isMedicationDispenseValid,
+} from '../medication-dispense/complete-medication-dispense';
 import MedicationDispenseReview from './medication-dispense-review.component';
 import StockDispense from './stock-dispense/stock-dispense.component';
 import styles from './forms.scss';
@@ -68,8 +61,8 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
   const { patient, isLoading } = usePatient(patientUuid);
   const config = useConfig<PharmacyConfig>();
 
-  // Keep track of inventory item
-  const [inventoryItem, setInventoryItem] = useState<InventoryItem>();
+  // Batches selected to dispense from, in first-expiry-first-out order
+  const [inventoryItems, setInventoryItems] = useState<Array<InventoryItem>>([]);
 
   // Keep track of medication dispense payload
   const [medicationDispensePayload, setMedicationDispensePayload] = useState(medicationDispense);
@@ -82,53 +75,8 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
     return dosageInstruction ? calculateIsFreeTextDosage(dosageInstruction) : false;
   });
 
-  const getDuplicateDispense = (dispense: MedicationDispense): MedicationDispense => {
-    const dispenses = medicationRequestBundle?.dispenses ?? [];
-    const duplicateCheckWindowDays = config.duplicateCheckWindowDays;
-    const getDispenseDate = (d: MedicationDispense) => d.whenHandedOver ?? d.whenPrepared;
-    const getTime = (date?: string) => {
-      if (!date) {
-        return null;
-      }
-
-      const parsedTime = new Date(date).getTime();
-      return Number.isNaN(parsedTime) ? null : parsedTime;
-    };
-    const windowMs = duplicateCheckWindowDays * 24 * 60 * 60 * 1000;
-    const currentDispenseTime = getTime(getDispenseDate(dispense)) ?? Date.now();
-
-    return dispenses
-      .filter((d) => d.status === MedicationDispenseStatus.completed)
-      .filter((d) => {
-        const dispenseTime = getTime(getDispenseDate(d));
-        if (dispenseTime === null) {
-          return false;
-        }
-
-        // Duplicate checks are relative to the dispense date being submitted, not "now".
-        return dispenseTime <= currentDispenseTime && currentDispenseTime - dispenseTime <= windowMs;
-      })
-      .sort((a, b) => {
-        return getTime(getDispenseDate(b)) - getTime(getDispenseDate(a));
-      })
-      .find((existingDispense) => {
-        if (mode === 'edit' && existingDispense.id && dispense.id && existingDispense.id === dispense.id) {
-          return false;
-        }
-        const sameMedication =
-          existingDispense.medicationCodeableConcept?.coding?.[0]?.code ===
-          dispense.medicationCodeableConcept?.coding?.[0]?.code;
-        const sameQuantity =
-          existingDispense.quantity?.value === dispense.quantity?.value &&
-          existingDispense.quantity?.code === dispense.quantity?.code;
-        const sameDose =
-          existingDispense.dosageInstruction?.[0]?.doseAndRate?.[0]?.doseQuantity?.value ===
-            dispense.dosageInstruction?.[0]?.doseAndRate?.[0]?.doseQuantity?.value &&
-          existingDispense.dosageInstruction?.[0]?.doseAndRate?.[0]?.doseQuantity?.code ===
-            dispense.dosageInstruction?.[0]?.doseAndRate?.[0]?.doseQuantity?.code;
-        return sameMedication && sameQuantity && sameDose;
-      });
-  };
+  const getDuplicateDispense = (dispense: MedicationDispense): MedicationDispense =>
+    findDuplicateDispense(dispense, medicationRequestBundle?.dispenses, config.duplicateCheckWindowDays);
 
   const handleDuplicateMedication = (previousDispense: MedicationDispense) => {
     const dispose = showModal('duplicate-dispense-modal', {
@@ -158,38 +106,12 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
     setIsSubmitting(true);
     const abortController = new AbortController();
     markEncounterAsStale(encounterUuid);
-    return saveMedicationDispense(medicationDispensePayload, MedicationDispenseStatus.completed, abortController)
-      .then((response) => {
-        if (response.ok) {
-          if (config.completeOrderWithThisDispense) {
-            return updateMedicationRequestFulfillerStatus(
-              getUuidFromReference(
-                medicationDispensePayload.authorizingPrescription[0].reference, // assumes authorizing prescription exist
-              ),
-              MedicationRequestFulfillerStatus.completed,
-            ).then(() => response);
-          }
-          const newFulfillerStatus = computeNewFulfillerStatusAfterDispenseEvent(
-            medicationDispensePayload,
-            medicationRequestBundle,
-            config.dispenseBehavior.restrictTotalQuantityDispensed,
-          );
-          if (getFulfillerStatus(medicationRequestBundle.request) !== newFulfillerStatus) {
-            return updateMedicationRequestFulfillerStatus(
-              getUuidFromReference(
-                medicationDispensePayload.authorizingPrescription[0].reference, // assumes authorizing prescription exist
-              ),
-              newFulfillerStatus,
-            ).then(() => response);
-          }
-        }
-        return response;
-      })
+    return completeMedicationDispense(medicationDispensePayload, medicationRequestBundle, config, abortController)
       .then((response) => {
         const { status } = response;
         if (config.enableStockDispense && (status === 201 || status === 200)) {
           const stockDispenseRequestPayload = createStockDispenseRequestPayload(
-            inventoryItem,
+            batchAllocation.allocations,
             patientUuid,
             encounterUuid,
             medicationDispensePayload,
@@ -270,37 +192,21 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
   }, []);
 
   // whether or not the form is valid and ready to submit
-  const isValid = useMemo(() => {
-    if (!medicationDispensePayload) {
-      return false;
-    }
-    const anyCodedDosage =
-      medicationDispensePayload.dosageInstruction[0]?.doseAndRate[0]?.doseQuantity?.value ||
-      medicationDispensePayload.dosageInstruction[0]?.doseAndRate[0]?.doseQuantity?.code ||
-      medicationDispensePayload.dosageInstruction[0]?.route?.coding[0]?.code ||
-      medicationDispensePayload.dosageInstruction[0]?.timing?.code?.coding[0].code;
+  const isValid = useMemo(
+    () => isMedicationDispenseValid(medicationDispensePayload, isFreeTextDosage),
+    [isFreeTextDosage, medicationDispensePayload],
+  );
 
-    const allCodedDosage =
-      medicationDispensePayload.dosageInstruction[0]?.doseAndRate[0]?.doseQuantity?.value &&
-      medicationDispensePayload.dosageInstruction[0]?.doseAndRate[0]?.doseQuantity?.code &&
-      medicationDispensePayload.dosageInstruction[0]?.route?.coding[0]?.code &&
-      medicationDispensePayload.dosageInstruction[0]?.timing?.code?.coding[0].code;
+  // How the dispense quantity splits across the selected batches. The dispense is blocked
+  // until the selection holds enough, since the stock call would otherwise be rejected
+  // after the medication dispense itself has already been saved.
+  const batchAllocation = useMemo(
+    () => allocateQuantityAcrossBatches(inventoryItems, medicationDispensePayload?.quantity?.value),
+    [inventoryItems, medicationDispensePayload?.quantity?.value],
+  );
+  const isStockSelectionValid = batchAllocation.allocations.length > 0 && batchAllocation.shortfall <= 0;
 
-    return (
-      medicationDispensePayload.performer &&
-      medicationDispensePayload.performer[0]?.actor.reference &&
-      medicationDispensePayload.quantity?.value &&
-      (!quantityRemaining || medicationDispensePayload?.quantity?.value <= quantityRemaining) &&
-      medicationDispensePayload.quantity?.code &&
-      ((allCodedDosage && !isFreeTextDosage) ||
-        (!anyCodedDosage && isFreeTextDosage && medicationDispensePayload.dosageInstruction[0]?.text)) &&
-      (!medicationDispensePayload.substitution.wasSubstituted ||
-        (medicationDispensePayload.substitution.reason[0]?.coding[0].code &&
-          medicationDispensePayload.substitution.type?.coding[0].code))
-    );
-  }, [isFreeTextDosage, medicationDispensePayload, quantityRemaining]);
-
-  const isButtonDisabled = (config.enableStockDispense ? !inventoryItem : false) || !isValid || isSubmitting;
+  const isButtonDisabled = (config.enableStockDispense ? !isStockSelectionValid : false) || !isValid || isSubmitting;
 
   const handleSubmitOrDuplicateCheck = () => {
     const duplicateDispense = medicationDispensePayload ? getDuplicateDispense(medicationDispensePayload) : null;
@@ -352,9 +258,10 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
                 />
                 {config.enableStockDispense && (
                   <StockDispense
-                    inventoryItem={inventoryItem}
+                    inventoryItems={inventoryItems}
                     medicationDispense={medicationDispense}
-                    updateInventoryItem={setInventoryItem}
+                    quantityToDispense={medicationDispensePayload.quantity?.value}
+                    updateInventoryItems={setInventoryItems}
                   />
                 )}
               </div>

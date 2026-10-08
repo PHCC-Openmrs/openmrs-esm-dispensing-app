@@ -4,6 +4,8 @@ import { WarningFilled } from '@carbon/react/icons';
 import { useTranslation } from 'react-i18next';
 import { type PatientUuid, useConfig, UserHasAccess } from '@openmrs/esm-framework';
 import {
+  computeFillsRemaining,
+  computeTotalFills,
   computeTotalQuantityDispensed,
   computeTotalQuantityOrdered,
   getConceptCodingDisplay,
@@ -70,11 +72,13 @@ const PrescriptionDetails: React.FC<{
       !medicationRequestBundle.dispenses?.length ||
       !getQuantityUnitsMatch([medicationRequestBundle.request, ...medicationRequestBundle.dispenses])
     ) {
-      return { quantityDispensed: undefined, totalQuantityOrdered: undefined };
+      return { quantityDispensed: undefined, totalQuantityOrdered: undefined, fillsRemaining: undefined };
     }
     return {
       quantityDispensed: computeTotalQuantityDispensed(medicationRequestBundle.dispenses),
       totalQuantityOrdered: computeTotalQuantityOrdered(medicationRequestBundle.request),
+      fillsRemaining: computeFillsRemaining(medicationRequestBundle),
+      totalFills: computeTotalFills(medicationRequestBundle.request),
     };
   };
 
@@ -166,7 +170,12 @@ const PrescriptionDetails: React.FC<{
           <p className={styles.emptyState}>{t('noPrescriptionsFound', 'No prescriptions found')}</p>
         ))}
       {medicationRequestBundles?.length > 0 && (
-        <PrescriptionsActionsFooter encounterUuid={encounterUuid} patientUuid={patientUuid} />
+        <PrescriptionsActionsFooter
+          encounterUuid={encounterUuid}
+          patientUuid={patientUuid}
+          medicationRequestBundles={medicationRequestBundles}
+          disabled={staleEncounterUuids.includes(encounterUuid)}
+        />
       )}
     </div>
   );

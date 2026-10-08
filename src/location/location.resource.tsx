@@ -20,15 +20,40 @@ export class MissingOptionalBackendDependencyError extends Error {
 
 /**
  * Returns the list of locations to show in the location filter dropdown, based on the configuration. If the
- * restrictToVisitLocationDescendants option is enabled, only returns locations that are descendants of the current login
- * location's nearest ancestor tagged as a visit location.
+ * restrictToSessionLocation option is enabled, only returns the user's login location, so that prescriptions ordered
+ * elsewhere are never requested. Otherwise, if the restrictToVisitLocationDescendants option is enabled, only returns
+ * locations that are descendants of the current login location's nearest ancestor tagged as a visit location.
  * Location options are further filtered with the tag specified in the configuration.
  */
 export function useLocations(config: PharmacyConfig) {
-  const { restrictToVisitLocationDescendants } = config.locationBehavior;
-  const byTag = useLocationsByTag(config, !restrictToVisitLocationDescendants);
-  const byVisit = useVisitLocationDescendants(config, restrictToVisitLocationDescendants);
+  const { restrictToVisitLocationDescendants, restrictToSessionLocation } = config.locationBehavior;
+  const sessionOnly = useSessionLocation(restrictToSessionLocation);
+  const byTag = useLocationsByTag(config, !restrictToSessionLocation && !restrictToVisitLocationDescendants);
+  const byVisit = useVisitLocationDescendants(config, !restrictToSessionLocation && restrictToVisitLocationDescendants);
+
+  if (restrictToSessionLocation) {
+    return sessionOnly;
+  }
   return restrictToVisitLocationDescendants ? byVisit : byTag;
+}
+
+/**
+ * The login location as the only option, for implementations that restrict pharmacists to prescriptions ordered at
+ * the location they logged in to. Reports isLoading until the session location is known, so callers don't fall back
+ * to an unfiltered query while the session is still resolving.
+ */
+function useSessionLocation(enabled: boolean) {
+  const { sessionLocation } = useSession();
+
+  const locations = useMemo(
+    () =>
+      enabled && sessionLocation?.uuid
+        ? [{ id: sessionLocation.uuid, name: sessionLocation.display, associatedPharmacyLocation: null }]
+        : [],
+    [enabled, sessionLocation],
+  );
+
+  return { locations, isLoading: enabled && !sessionLocation?.uuid, error: undefined, isValidating: false };
 }
 
 function toSimpleLocation(associatedPharmacyLocationAttribute: string) {

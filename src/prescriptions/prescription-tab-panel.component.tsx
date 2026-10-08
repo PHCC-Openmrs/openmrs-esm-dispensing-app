@@ -29,6 +29,15 @@ const PrescriptionTabPanel: React.FC<PrescriptionTabPanelProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const debouncedSearchTerm = useDebounce(searchTerm, 500);
   const [filterLocations, setFilterLocations] = useState<SimpleLocation[]>([]);
+  const { restrictToSessionLocation, restrictToVisitLocationDescendants } = config.locationBehavior;
+
+  // when restricted to the login location, useLocations only ever returns that one location, so it is both the
+  // filter and the only thing the user may see; otherwise fall back to the configurable filter behavior
+  const tableLocations = restrictToSessionLocation
+    ? locations
+    : restrictToVisitLocationDescendants && filterLocations.length === 0
+      ? locations
+      : filterLocations;
 
   // set any initially selected locations
   useEffect(() => {
@@ -45,7 +54,8 @@ const PrescriptionTabPanel: React.FC<PrescriptionTabPanelProps> = ({
   return (
     <TabPanel>
       <div className={styles.searchContainer}>
-        {config.locationBehavior?.locationFilter?.enabled &&
+        {!restrictToSessionLocation &&
+          config.locationBehavior?.locationFilter?.enabled &&
           !isLocationsLoading &&
           isInitialized.current &&
           locations?.length > 1 && (
@@ -76,15 +86,12 @@ const PrescriptionTabPanel: React.FC<PrescriptionTabPanelProps> = ({
         />
       </div>
       <PrescriptionsTable
-        loadData={isTabActive}
+        // don't query before the login location is known, or the restricted view would briefly show every location
+        loadData={isTabActive && (!restrictToSessionLocation || tableLocations.length > 0)}
         status={status}
         customPrescriptionsTableEndpoint={customPrescriptionsTableEndpoint}
         debouncedSearchTerm={debouncedSearchTerm}
-        locations={
-          config.locationBehavior.restrictToVisitLocationDescendants && filterLocations.length === 0
-            ? locations
-            : filterLocations
-        }
+        locations={tableLocations}
       />
     </TabPanel>
   );

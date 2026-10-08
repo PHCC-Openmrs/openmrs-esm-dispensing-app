@@ -15,7 +15,9 @@ import {
   calculateIsFreeTextDosage,
   computeNewFulfillerStatusAfterDelete,
   computeNewFulfillerStatusAfterDispenseEvent,
+  computeFillsRemaining,
   computeQuantityRemaining,
+  computeTotalFills,
   computeTotalQuantityDispensed,
   computeTotalQuantityOrdered,
   getAssociatedMedicationDispenses,
@@ -832,6 +834,87 @@ describe('Util Tests', () => {
         ])
       ).toThrow("Can't calculate quantity dispensed if units don't match");
     });*/
+  });
+
+  describe('test computeTotalFills and computeFillsRemaining', () => {
+    const buildRequest = (numberOfRepeatsAllowed: number, quantityValue: number): MedicationRequest => ({
+      dispenseRequest: {
+        numberOfRepeatsAllowed,
+        quantity: {
+          value: quantityValue,
+          unit: 'mg',
+          code: '123abc',
+        },
+        validityPeriod: { start: '' },
+      },
+      dosageInstruction: undefined,
+      encounter: { reference: '', type: '' },
+      id: '',
+      intent: '',
+      medicationReference: { display: '', reference: '', type: '' },
+      meta: { lastUpdated: '' },
+      priority: '',
+      requester: { display: '', identifier: { value: '' }, reference: '', type: '' },
+      resourceType: 'MedicationRequest',
+      status: MedicationRequestStatus.active,
+      subject: { display: '', reference: '', type: '' },
+      extension: [],
+    });
+
+    const buildDispense = (quantityValue: number): MedicationDispense =>
+      ({
+        resourceType: 'MedicationDispense',
+        status: MedicationDispenseStatus.completed,
+        quantity: {
+          value: quantityValue,
+          unit: 'mg',
+          code: '123abc',
+        },
+      }) as unknown as MedicationDispense;
+
+    test('should count the original fill plus one per refill', () => {
+      expect(computeTotalFills(buildRequest(2, 30))).toBe(3);
+    });
+
+    test('should count a single fill when no refills are set', () => {
+      expect(computeTotalFills(buildRequest(undefined, 30))).toBe(1);
+    });
+
+    test('should report every fill remaining before anything is dispensed', () => {
+      expect(computeFillsRemaining({ request: buildRequest(2, 30), dispenses: [] })).toBe(3);
+    });
+
+    test('should decrement once a whole fill has been handed over', () => {
+      expect(computeFillsRemaining({ request: buildRequest(2, 30), dispenses: [buildDispense(30)] })).toBe(2);
+    });
+
+    test('should not decrement on a partial fill', () => {
+      expect(computeFillsRemaining({ request: buildRequest(2, 30), dispenses: [buildDispense(10)] })).toBe(3);
+    });
+
+    test('should reach zero once the full ordered quantity is out', () => {
+      expect(
+        computeFillsRemaining({
+          request: buildRequest(2, 30),
+          dispenses: [buildDispense(30), buildDispense(30), buildDispense(30)],
+        }),
+      ).toBe(0);
+    });
+
+    test('should not go negative if more than the ordered quantity is dispensed', () => {
+      expect(
+        computeFillsRemaining({
+          request: buildRequest(1, 30),
+          dispenses: [buildDispense(30), buildDispense(30), buildDispense(30)],
+        }),
+      ).toBe(0);
+    });
+
+    test('should return null when the request carries no per-fill quantity', () => {
+      const request = buildRequest(2, 30);
+      request.dispenseRequest.quantity = undefined;
+      expect(computeFillsRemaining({ request, dispenses: [] })).toBeNull();
+    });
   });
 
   describe('test computeTotalQuantityOrdered', () => {

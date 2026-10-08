@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Button, Search, TabPanel } from '@carbon/react';
 import { useTranslation } from 'react-i18next';
-import { PatientSearchPictogram } from '@openmrs/esm-framework';
+import { PatientSearchPictogram, useConfig } from '@openmrs/esm-framework';
+import { type PharmacyConfig } from '../config-schema';
 import PrescriptionsTable from './prescriptions-table.component';
 import styles from './patient-search-tab-panel.scss';
 import { type SimpleLocation } from '../types';
@@ -12,6 +13,8 @@ interface PatientSearchTabPanelProps {
 
 const PatientSearchTabPanel: React.FC<PatientSearchTabPanelProps> = ({ locations }) => {
   const { t } = useTranslation();
+  const config = useConfig<PharmacyConfig>();
+  const { restrictToSessionLocation } = config.locationBehavior;
   const [searchTerm, setSearchTerm] = useState('');
   const [submittedSearchTerm, setSubmittedSearchTerm] = useState('');
 
@@ -41,7 +44,8 @@ const PatientSearchTabPanel: React.FC<PatientSearchTabPanelProps> = ({ locations
         </form>
         {submittedSearchTerm ? (
           <PrescriptionsTable
-            loadData={true}
+            // don't query before the login location is known, or the restricted view would search every location
+            loadData={!restrictToSessionLocation || locations.length > 0}
             status={'ACTIVE'}
             debouncedSearchTerm={submittedSearchTerm}
             locations={locations}

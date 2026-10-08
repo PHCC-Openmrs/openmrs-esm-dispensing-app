@@ -175,6 +175,37 @@ export function computeTotalQuantityOrdered(medicationRequest: MedicationRequest
 }
 
 /**
+ * How many fills the prescriber authorized: the original fill plus one per refill.
+ *
+ * Note the off-by-one that trips people up - `numberOfRepeatsAllowed` counts the *repeats*,
+ * so an order with 2 refills is three fills in total, which is why
+ * `computeTotalQuantityOrdered` multiplies by `1 + refills`.
+ */
+export function computeTotalFills(medicationRequest: MedicationRequest): number {
+  const refillsAllowed = getRefillsAllowed(medicationRequest);
+  return 1 + (refillsAllowed ? refillsAllowed : 0);
+}
+
+/**
+ * How many fills are still owed on this request, the original fill included.
+ *
+ * Derived from quantity rather than from a count of dispense records, because a pharmacist
+ * can hand over less than a full fill; a fill is only used up once its whole quantity is out.
+ * Returns null when the order carries no per-fill quantity, since there is then nothing to
+ * divide by and no meaningful fill count.
+ *
+ * Throws the units-mismatch error via `computeQuantityRemaining`, so callers must check
+ * `getQuantityUnitsMatch` first, exactly as they already do for the dispensed total.
+ */
+export function computeFillsRemaining(medicationRequestBundle: MedicationRequestBundle): number {
+  const perFillQuantity = medicationRequestBundle?.request?.dispenseRequest?.quantity?.value;
+  if (!perFillQuantity) {
+    return null;
+  }
+  return Math.max(0, Math.ceil(computeQuantityRemaining(medicationRequestBundle) / perFillQuantity));
+}
+
+/**
  * Given a medication request and an array of medication dispenses, fetch all dispenses authorized by that request
  *
  * @param medicationRequest

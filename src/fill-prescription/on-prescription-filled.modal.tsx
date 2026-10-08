@@ -1,28 +1,9 @@
 import React from 'react';
-import { useSWRConfig } from 'swr';
 import { Button, ModalBody, ModalFooter, ModalHeader } from '@carbon/react';
 import { Trans, useTranslation } from 'react-i18next';
-import { getPatientName, showSnackbar, useConfig, useSession } from '@openmrs/esm-framework';
-import {
-  updateMedicationRequestFulfillerStatus,
-  usePrescriptionDetails,
-} from '../medication-request/medication-request.resource';
-import {
-  getMedicationDisplay,
-  getMedicationReferenceOrCodeableConcept,
-  getUuidFromReference,
-  markEncounterAsStale,
-  revalidate,
-} from '../utils';
-import {
-  initiateMedicationDispenseBody,
-  saveMedicationDispense,
-  useProviders,
-} from '../medication-dispense/medication-dispense.resource';
-import { type PharmacyConfig } from '../config-schema';
-import { notifyIfPrescriptionFulfillmentComplete } from '../pharmacy-queue-notification';
+import { getPatientName } from '@openmrs/esm-framework';
+import { usePrescriptionDetails } from '../medication-request/medication-request.resource';
 import MedicationEvent from '../components/medication-event.component';
-import { MedicationDispenseStatus, MedicationRequestFulfillerStatus } from '../types';
 import styles from './on-prescription-filled.scss';
 
 interface OnPrescriptionFilledModalProps {
@@ -41,73 +22,12 @@ interface OnPrescriptionFilledModalProps {
 
 /**
  * This modal appears after the user submits the order basket opened via the
- * "Fill Prescription" button in the dispensing app. It confirms whether the user
- * would like to immediately mark the medication orders as dispensed.
+ * "Fill Prescription" button in the dispensing app. It lists the prescriptions
+ * that were just ordered; dispensing is done separately from the prescription.
  */
 const OnPrescriptionFilledModal: React.FC<OnPrescriptionFilledModalProps> = ({ patient, encounterUuid, close }) => {
-  const { dispenserProviderRoles, medicationRequestExpirationPeriodInDays } = useConfig<PharmacyConfig>();
-  const session = useSession();
-  const providers = useProviders(dispenserProviderRoles);
-  const { medicationRequestBundles, isLoading: isLoadingPrescriptionDetails } = usePrescriptionDetails(encounterUuid);
+  const { medicationRequestBundles } = usePrescriptionDetails(encounterUuid);
   const { t } = useTranslation();
-  const { mutate } = useSWRConfig();
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
-
-  const onConfirm = async () => {
-    setIsSubmitting(true);
-    markEncounterAsStale(encounterUuid);
-    try {
-      for (const medicationRequestBundle of medicationRequestBundles) {
-        const medicationDispensePayload = initiateMedicationDispenseBody(
-          medicationRequestBundle.request,
-          session,
-          providers,
-          true,
-        );
-        const medicationDisplay = getMedicationDisplay(
-          getMedicationReferenceOrCodeableConcept(medicationRequestBundle.request),
-        );
-
-        await saveMedicationDispense(medicationDispensePayload, MedicationDispenseStatus.completed)
-          .then((response) => {
-            const hasNoRefills = medicationRequestBundle.request.dispenseRequest.numberOfRepeatsAllowed == 0;
-            if (response.ok && hasNoRefills) {
-              return updateMedicationRequestFulfillerStatus(
-                getUuidFromReference(
-                  medicationDispensePayload.authorizingPrescription[0].reference, // assumes authorizing prescription exist
-                ),
-                MedicationRequestFulfillerStatus.completed,
-              ).then(() => response);
-            } else {
-              return response;
-            }
-          })
-          .then(() => {
-            showSnackbar({
-              title: t('stockDispensed', 'Stock dispensed'),
-              subtitle: medicationDisplay,
-              isLowContrast: false,
-            });
-          })
-          .catch((error) => {
-            showSnackbar({
-              title: t('errorDispensingMedication', 'Error dispensing medication'),
-              kind: 'error',
-              subtitle: t('errorDispensingMedicationMessage', '{{medication}}: {{error}}', {
-                medication: medicationDisplay,
-                error: error?.message,
-              }),
-            });
-          });
-      }
-
-      close();
-    } finally {
-      revalidate(mutate, encounterUuid);
-      notifyIfPrescriptionFulfillmentComplete(encounterUuid, patient.id, medicationRequestExpirationPeriodInDays);
-      setIsSubmitting(false);
-    }
-  };
 
   const patientName = getPatientName(patient);
 
@@ -126,15 +46,8 @@ const OnPrescriptionFilledModal: React.FC<OnPrescriptionFilledModalProps> = ({ p
         ))}
       </ModalBody>
       <ModalFooter>
-        <Button disabled={isSubmitting} kind="secondary" onClick={close}>
+        <Button kind="secondary" onClick={close}>
           {t('createOrderWithoutDispensing', 'Create order without dispensing')}
-        </Button>
-        <Button
-          disabled={isSubmitting || isLoadingPrescriptionDetails}
-          onClick={() => {
-            onConfirm();
-          }}>
-          {t('dispenseAllPrescriptions', 'Dispense all prescriptions')}
         </Button>
       </ModalFooter>
     </>
