@@ -5,13 +5,14 @@ import userEvent from '@testing-library/user-event';
 import { useConfig } from '@openmrs/esm-framework';
 import { type InventoryItem, type MedicationDispense, MedicationDispenseStatus } from '../../types';
 import StockDispense from './stock-dispense.component';
-import { useDispenseStock } from './stock.resource';
+import type * as stockResource from './stock.resource';
+import { allocateQuantityAcrossBatches, useDispenseStock } from './stock.resource';
 
 const mockUseConfig = vi.mocked(useConfig);
 const mockUseDispenseStock = vi.mocked(useDispenseStock);
 
-vi.mock('./stock.resource', () => ({
-  __esModule: true,
+vi.mock('./stock.resource', async (importOriginal) => ({
+  ...(await importOriginal<typeof stockResource>()),
   useDispenseStock: vi.fn(),
 }));
 
@@ -52,9 +53,17 @@ const createMedicationDispense = (duration: number | null, durationUnit = 'd'): 
     ],
   }) as unknown as MedicationDispense;
 
-const renderStockDispense = (medicationDispense: MedicationDispense) =>
+const renderStockDispense = (
+  medicationDispense: MedicationDispense,
+  { selected = [] as Array<InventoryItem>, quantityToDispense = 30, updateInventoryItems = vi.fn() } = {},
+) =>
   render(
-    <StockDispense medicationDispense={medicationDispense} inventoryItem={undefined} updateInventoryItem={vi.fn()} />,
+    <StockDispense
+      medicationDispense={medicationDispense}
+      quantityToDispense={quantityToDispense}
+      inventoryItems={selected}
+      updateInventoryItems={updateInventoryItems}
+    />,
   );
 
 /**
@@ -169,5 +178,76 @@ describe('StockDispense batch eligibility', () => {
     await openBatchSelector();
 
     expect(screen.getAllByRole('option')).toHaveLength(1);
+  });
+});
+
+describe('allocateQuantityAcrossBatches', () => {
+  const batchA = createInventoryItem({ stockBatchUuid: 'a', batchNumber: 'A', quantity: 20 });
+  const batchB = createInventoryItem({ stockBatchUuid: 'b', batchNumber: 'B', quantity: 20 });
+  const batchC = createInventoryItem({ stockBatchUuid: 'c', batchNumber: 'C', quantity: 20 });
+
+  test('drains batches in the order given until the quantity is covered', () => {
+    const { allocations, shortfall } = allocateQuantityAcrossBatches([batchA, batchB, batchC], 50);
+
+    expect(allocations.map((a) => [a.inventoryItem.batchNumber, a.quantity])).toEqual([
+      ['A', 20],
+      ['B', 20],
+      ['C', 10],
+    ]);
+    expect(shortfall).toBe(0);
+  });
+
+  test('leaves out selected batches that are not needed', () => {
+    const { allocations } = allocateQuantityAcrossBatches([batchA, batchB], 15);
+
+    expect(allocations).toEqual([{ inventoryItem: batchA, quantity: 15 }]);
+  });
+
+  test('reports the shortfall when the selection cannot cover the quantity', () => {
+    expect(allocateQuantityAcrossBatches([batchA, batchB], 50).shortfall).toBe(10);
+  });
+});
+
+describe('StockDispense multi-batch selection', () => {
+  const batchA = createInventoryItem({
+    stockBatchUuid: 'a',
+    batchNumber: 'BATCH-A',
+    quantity: 20,
+    expiration: daysFromNow(100),
+  });
+  const batchB = createInventoryItem({
+    stockBatchUuid: 'b',
+    batchNumber: 'BATCH-B',
+    quantity: 20,
+    expiration: daysFromNow(200),
+  });
+
+  beforeEach(() => {
+    mockUseDispenseStock.mockReturnValue({ inventoryItems: [batchB, batchA], error: null, isLoading: false });
+  });
+
+  test('reports selected batches in first-expiry-first-out order', async () => {
+    const updateInventoryItems = vi.fn();
+    renderStockDispense(createMedicationDispense(null), { selected: [batchB], updateInventoryItems });
+
+    await openBatchSelector();
+    // options render in FEFO order, so BATCH-A (earliest expiry) is first
+    await userEvent.setup().click(screen.getAllByRole('option')[0]);
+
+    expect(updateInventoryItems).toHaveBeenLastCalledWith([batchA, batchB]);
+  });
+
+  test('warns when the selected batches hold less than the quantity being dispensed', () => {
+    renderStockDispense(createMedicationDispense(null), { selected: [batchA], quantityToDispense: 30 });
+
+    expect(screen.getByText(/Selected batches do not cover the quantity/i)).toBeInTheDocument();
+  });
+
+  test('shows how the quantity splits across batches', () => {
+    renderStockDispense(createMedicationDispense(null), { selected: [batchA, batchB], quantityToDispense: 30 });
+
+    // the i18n test mock does not interpolate, so one allocation row per batch used
+    expect(screen.getByRole('list', { name: 'Batch allocation' }).querySelectorAll('li')).toHaveLength(2);
+    expect(screen.queryByText(/Selected batches do not cover the quantity/i)).not.toBeInTheDocument();
   });
 });

@@ -170,7 +170,12 @@ const PrescriptionDetails: React.FC<{
           <p className={styles.emptyState}>{t('noPrescriptionsFound', 'No prescriptions found')}</p>
         ))}
       {medicationRequestBundles?.length > 0 && (
-        <PrescriptionsActionsFooter encounterUuid={encounterUuid} patientUuid={patientUuid} />
+        <PrescriptionsActionsFooter
+          encounterUuid={encounterUuid}
+          patientUuid={patientUuid}
+          medicationRequestBundles={medicationRequestBundles}
+          disabled={staleEncounterUuids.includes(encounterUuid)}
+        />
       )}
     </div>
   );
