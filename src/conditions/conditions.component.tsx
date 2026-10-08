@@ -102,6 +102,18 @@ const PatientConditions: React.FC<PatientConditionsProps> = ({ patientUuid }) =>
         )}
       </DataTable>
       <Pagination
+        itemsPerPageText={t('itemsPerPage', 'Items per page:')}
+        itemRangeText={(min, max, total) =>
+          t('paginationItemRange', '{{min}}–{{max}} of {{total}} items', { min, max, total })
+        }
+        pageRangeText={(_current, total) =>
+          t('paginationPageRange', {
+            count: total,
+            total,
+            defaultValue_one: 'of {{total}} page',
+            defaultValue_other: 'of {{total}} pages',
+          })
+        }
         page={currentPage}
         pageSize={pageSize}
         pageSizes={pageSizesOptions}
