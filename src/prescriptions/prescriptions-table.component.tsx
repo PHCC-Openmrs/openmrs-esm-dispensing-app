@@ -193,6 +193,20 @@ const PrescriptionsTable: React.FC<PrescriptionsTableProps> = ({
                 pageSize={pageSize}
                 pageSizes={[10, 20, 30, 40, 50, 100]}
                 totalItems={totalOrders}
+                itemsPerPageText={t('itemsPerPage', 'Items per page:')}
+                backwardText={t('previousPage', 'Previous page')}
+                forwardText={t('nextPage', 'Next page')}
+                itemRangeText={(min, max, total) =>
+                  t('paginationItemRange', '{{min}}–{{max}} of {{total}} items', { min, max, total })
+                }
+                pageRangeText={(_current, total) =>
+                  t('paginationPageRange', {
+                    count: total,
+                    total,
+                    defaultValue_one: 'of {{total}} page',
+                    defaultValue_other: 'of {{total}} pages',
+                  })
+                }
                 onChange={({ page: newPage, pageSize: newPageSize }) => {
                   if (newPageSize !== pageSize) {
                     setPage(1);
