@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import dayjs from 'dayjs';
 import { useTranslation } from 'react-i18next';
-import { ComboBox, Dropdown, NumberInput, Stack, TextArea, Toggle } from '@carbon/react';
+import { ComboBox, Dropdown, NumberInput, Stack, TextArea, TextInput, Toggle } from '@carbon/react';
 import { OpenmrsDatePicker, useConfig, useSession, userHasAccess, ResponsiveWrapper } from '@openmrs/esm-framework';
 import { getConceptCodingUuid, getMedicationReferenceOrCodeableConcept, getOpenMRSMedicineDrugName } from '../utils';
 import { useMedicationCodeableConcept, useMedicationFormulations } from '../medication/medication.resource';
@@ -189,6 +189,16 @@ const MedicationDispenseReview: React.FC<MedicationDispenseReviewProps> = ({
         )
       : undefined;
   }, [medicationDispense?.performer, providersPlusCurrentUser]);
+  // Dispensed by is always the logged-in user; an existing dispense keeps whoever already dispensed it.
+  const dispenser = useMemo(
+    () =>
+      initialDispenser ??
+      (session?.currentProvider?.uuid
+        ? { uuid: session.currentProvider.uuid, person: { display: session?.user?.person?.display ?? '' } }
+        : undefined),
+    [initialDispenser, session],
+  );
+
   useEffect(() => {
     if (initialDispenser?.uuid) {
       updateMedicationDispense({
@@ -619,27 +629,13 @@ const MedicationDispenseReview: React.FC<MedicationDispenseReviewProps> = ({
           }}
           value={dayjs(medicationDispense.whenHandedOver).toDate()}></OpenmrsDatePicker>
 
-        {providersPlusCurrentUser && (
+        {dispenser && (
           <ResponsiveWrapper>
-            <ComboBox
+            <TextInput
               id="dispenser"
-              initialSelectedItem={initialDispenser}
-              onChange={({ selectedItem }) => {
-                const dispenserUuid = selectedItem ? selectedItem.uuid : session.currentProvider.uuid;
-                updateMedicationDispense({
-                  performer: [
-                    {
-                      actor: {
-                        reference: `Practitioner/${dispenserUuid}`,
-                      },
-                    },
-                  ],
-                });
-              }}
-              items={providersPlusCurrentUser}
-              itemToString={(item) => item?.person?.display}
-              required
-              titleText={t('dispensedBy', 'Dispensed by')}
+              readOnly
+              value={dispenser.person?.display ?? ''}
+              labelText={t('dispensedBy', 'Dispensed by')}
             />
           </ResponsiveWrapper>
         )}
