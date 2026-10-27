@@ -17,7 +17,11 @@ export const PRIVILEGE_DELETE_DISPENSE_THIS_PROVIDER_ONLY = 'Task: dispensing.de
 
 export const JSON_MERGE_PATH_MIME_TYPE = 'application/merge-patch+json';
 
-export const PRESCRIPTIONS_TABLE_ENDPOINT = 'Encounter?_query=encountersWithMedicationRequests';
+// served by the labtestreport module in the distro rather than fhir2: same results as fhir2's
+// encountersWithMedicationRequests, except the patient name search matches the typed words to the name
+// words in order (first word to the first name, second to the next name word, ...) instead of matching
+// each word anywhere in the name
+export const PRESCRIPTIONS_TABLE_ENDPOINT = 'Encounter?_query=encountersWithMedicationRequestsByPatientName';
 
 export const PRESCRIPTION_DETAILS_ENDPOINT = 'MedicationRequest';
 
