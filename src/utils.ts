@@ -530,3 +530,49 @@ const dispensingStore = createGlobalStore<DispensingStore>('dispensing-store', {
 export function useStaleEncounterUuids() {
   return useStore(dispensingStore);
 }
+
+// the patient's name without the "(OpenMRS ID: ..., Age: ...)" the FHIR display adds, as lower case words
+function getNameWords(patientDisplay: string): Array<string> {
+  return (patientDisplay ?? '')
+    .split('(')[0]
+    .toLowerCase()
+    .split(/[\s,]+/)
+    .filter(Boolean);
+}
+
+// position in the name where the words appear one after the other, each starting the name word, or -1
+function findWordSequence(nameWords: Array<string>, sequence: Array<string>): number {
+  for (let start = 0; start + sequence.length <= nameWords.length; start++) {
+    if (sequence.every((word, i) => nameWords[start + i].startsWith(word))) {
+      return start;
+    }
+  }
+  return -1;
+}
+
+/**
+ * How well a patient's name matches what was typed in the patient search: the lower, the better.
+ * The position of the typed words in the name decides, so a name with the word first (the first name)
+ * comes before one with it in the middle, which comes before one with it last. With several words:
+ * the words in the order typed, then in the reverse order ("karan kumar" for "kumar karan"), then
+ * all of them anywhere in the name, then only some of them.
+ */
+export function getPatientNameMatchRank(patientDisplay: string, searchTerm: string): number {
+  const nameWords = getNameWords(patientDisplay);
+  const typedWords = getNameWords(searchTerm);
+  const inOrder = findWordSequence(nameWords, typedWords);
+  if (inOrder >= 0) {
+    return inOrder;
+  }
+  const reversed = findWordSequence(nameWords, [...typedWords].reverse());
+  if (reversed >= 0) {
+    return 100 + reversed;
+  }
+  const positions = typedWords.map((word) => nameWords.findIndex((nameWord) => nameWord.includes(word)));
+  const found = positions.filter((position) => position >= 0);
+  if (found.length === typedWords.length) {
+    return 200 + Math.min(...found);
+  }
+  // some of the words, or matched on something other than the name (the identifier)
+  return found.length > 0 ? 300 + Math.min(...found) : 400;
+}

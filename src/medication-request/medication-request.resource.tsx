@@ -16,6 +16,7 @@ import {
   type SimpleLocation,
 } from '../types';
 import {
+  getPatientNameMatchRank,
   getPrescriptionDetailsEndpoint,
   getMedicationDisplay,
   getMedicationReferenceOrCodeableConcept,
@@ -29,6 +30,21 @@ import {
   summarizePrescriptionStates,
 } from '../prescription-state';
 
+// A patient name search is ranked by how well each name matches, which the server cannot do: it only sorts
+// by date and pages. So a search fetches up to this many matches at once and ranks and pages them here. A
+// search with more matches than this is not ranked, but shown in date order, page by page, as without it.
+const SEARCH_FETCH_LIMIT = 100;
+
+function mergeSearchResponses(responses: Array<{ data: EncounterResponse }>): { data: EncounterResponse } {
+  const entries = new Map<string, EncounterResponse['entry'][number]>();
+  responses.forEach((response) =>
+    response.data.entry?.forEach((entry) => entries.set(`${entry.resource.resourceType}/${entry.resource.id}`, entry)),
+  );
+  return {
+    data: { ...responses[0].data, entry: [...entries.values()] },
+  };
+}
+
 export function usePrescriptionsTable(
   loadData: boolean,
   customPrescriptionsTableEndpoint: string = '',
@@ -41,23 +57,60 @@ export function usePrescriptionsTable(
   refreshInterval: number,
   actionOptions: ActionAvailabilityOptions,
 ) {
-  const { data, error } = useSWR<{ data: EncounterResponse }, Error>(
-    loadData
+  const expiryDate = dayjs(new Date())
+    .startOf('day')
+    .subtract(medicationRequestExpirationPeriodInDays, 'day')
+    .toISOString();
+  const locationIds = locations?.map((location) => location.id).join(',');
+
+  // a search for "kumar karan" also looks for "kumar" and "karan" alone: the server only returns patients
+  // with every word in their name, and the ones with just one of them come after those in the ranking
+  const searchTerm = patientSearchTerm.trim();
+  const searchWords = searchTerm.split(/\s+/).filter(Boolean);
+  const searchTerms = searchTerm ? [...new Set([searchTerm, ...(searchWords.length > 1 ? searchWords : [])])] : [];
+  const { data: searchResponses, error: searchError } = useSWR<Array<{ data: EncounterResponse }>, Error>(
+    loadData && searchTerms.length
+      ? [
+          'prescriptions-name-search',
+          ...searchTerms.map((term) =>
+            getPrescriptionTableEndpoint(
+              customPrescriptionsTableEndpoint,
+              status,
+              0,
+              SEARCH_FETCH_LIMIT,
+              expiryDate,
+              term,
+              locationIds,
+            ),
+          ),
+        ]
+      : null,
+    ([, ...urls]: Array<string>) => Promise.all(urls.map((url) => openmrsFetch(url))),
+    { refreshInterval: refreshInterval },
+  );
+  const tooManyMatchesToRank = searchResponses?.some((response) => response.data.total > SEARCH_FETCH_LIMIT);
+  const isRanking = searchTerms.length > 0 && searchResponses !== undefined && !tooManyMatchesToRank;
+
+  const { data: pagedData, error: pagedError } = useSWR<{ data: EncounterResponse }, Error>(
+    loadData && (!searchTerms.length || tooManyMatchesToRank)
       ? getPrescriptionTableEndpoint(
           customPrescriptionsTableEndpoint,
           status,
           pageOffset,
           pageSize,
-          dayjs(new Date()).startOf('day').subtract(medicationRequestExpirationPeriodInDays, 'day').toISOString(),
+          expiryDate,
           patientSearchTerm,
-          locations?.map((location) => location.id).join(','),
+          locationIds,
         )
       : null,
     openmrsFetch,
     { refreshInterval: refreshInterval },
   );
+  const data = isRanking ? mergeSearchResponses(searchResponses) : pagedData;
+  const error = pagedError ?? searchError;
 
   let prescriptionsTableRows: PrescriptionsTableRow[];
+  let rankedMatchCount: number;
   if (data) {
     const entries = data?.data.entry;
     if (entries) {
@@ -91,6 +144,15 @@ export function usePrescriptionsTable(
         );
       });
       prescriptionsTableRows.sort((a, b) => (a.created < b.created ? 1 : -1));
+      if (isRanking) {
+        // best name match first, the newest prescription first among equal matches, then this page of them
+        const ranks = new Map(
+          prescriptionsTableRows.map((row) => [row.id, getPatientNameMatchRank(row.patient.name, searchTerm)]),
+        );
+        prescriptionsTableRows.sort((a, b) => ranks.get(a.id) - ranks.get(b.id));
+        rankedMatchCount = prescriptionsTableRows.length;
+        prescriptionsTableRows = prescriptionsTableRows.slice(pageOffset, pageOffset + pageSize);
+      }
     } else {
       prescriptionsTableRows = [];
     }
@@ -100,7 +162,7 @@ export function usePrescriptionsTable(
     prescriptionsTableRows,
     error: error,
     isLoading: !prescriptionsTableRows && !error,
-    totalOrders: data?.data.total,
+    totalOrders: isRanking ? rankedMatchCount : data?.data.total,
   };
 }
 

@@ -38,6 +38,7 @@ import {
   getQuantityUnitsMatch,
   getRefillsAllowed,
   isMostRecentMedicationDispense,
+  getPatientNameMatchRank,
 } from './utils';
 
 describe('Util Tests', () => {
@@ -2294,5 +2295,43 @@ describe('Util Tests', () => {
       } as DosageInstruction;
       expect(calculateIsFreeTextDosage(dosageInstruction)).toBe(true);
     });
+  });
+});
+
+describe('getPatientNameMatchRank', () => {
+  const rank = (name: string, term: string) => getPatientNameMatchRank(`${name} (OpenMRS ID: 1005CFA, Age: 23)`, term);
+
+  test('a word ranks by its place in the name: first name, then middle names, then last name', () => {
+    expect(rank('Kumar Ravi Sharma', 'kumar')).toBeLessThan(rank('Ravi Kumar Sharma', 'kumar'));
+    expect(rank('Ravi Kumar Sharma', 'kumar')).toBeLessThan(rank('Ravi Sharma Kumar', 'kumar'));
+    expect(rank('Ravi Kumar Anil Sharma', 'kumar')).toBeLessThan(rank('Ravi Anil Kumar Sharma', 'kumar'));
+  });
+
+  test('is case insensitive and matches the start of a name word', () => {
+    expect(rank('KUMAR Ravi', 'kum')).toBe(0);
+    expect(rank('Ravi kumar', 'KUMAR')).toBe(1);
+  });
+
+  test('several words rank in the order typed, then reversed, then anywhere, then only some of them', () => {
+    const ranks = [
+      rank('Kumar Karan Singh', 'kumar karan'),
+      rank('Anil Kumar Karan', 'kumar karan'),
+      rank('Karan Kumar', 'kumar karan'),
+      rank('Rao Karan Kumar', 'kumar karan'),
+      rank('Kumar Anil Karan', 'kumar karan'),
+      rank('Karan Rao', 'kumar karan'),
+      rank('Rao Kumar', 'kumar karan'),
+    ];
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    expect(new Set(ranks).size).toBeGreaterThan(5);
+  });
+
+  test('a match on the identifier rather than the name ranks last', () => {
+    expect(getPatientNameMatchRank('Ravi Singh (OpenMRS ID: 1005CFA, Age: 23)', '1005CFA')).toBe(400);
+  });
+
+  test('ignores the text the display adds after the name, and copes with no name', () => {
+    expect(getPatientNameMatchRank('Ravi Singh (OpenMRS ID: Kumar-1, Age: 23)', 'kumar')).toBe(400);
+    expect(getPatientNameMatchRank(undefined, 'kumar')).toBe(400);
   });
 });

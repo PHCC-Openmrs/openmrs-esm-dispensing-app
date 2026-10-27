@@ -23,37 +23,140 @@ vi.mock('react', async (importOriginal) => {
   };
 });
 
+// the hook asks useSWR for the name search (an array key, or null) and for the page itself (a url, or null):
+// only the page gets the data, as a search is checked by its key
+const swrReturning = (data) => (key) => (key === null || Array.isArray(key) ? { data: undefined } : { data });
+
 const allButtonsEnabled = { pauseButtonEnabled: true, closeButtonEnabled: true };
 
 describe('Medication Request Resource Test', () => {
   test('usePrescriptionsTable should call active endpoint and proper date based on expiration period if status parameter is active', () => {
     // @ts-ignore
-    useSWR.mockImplementation(() => ({ data: { data: 'mockedReturnData' } }));
+    useSWR.mockImplementation(swrReturning({ data: 'mockedReturnData' }));
     usePrescriptionsTable(true, '', 'ACTIVE', 5, 5, 'bob', null, 10, 10000, allButtonsEnabled);
+    // a name search fetches the first hundred matches at once, to rank them
     expect(useSWR).toHaveBeenCalledWith(
-      `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequests&_getpagesoffset=5&_count=5&date=ge${dayjs()
-        .startOf('day')
-        .subtract(10, 'day')
-        .toISOString()}&status=ACTIVE&patientSearchTerm=bob`,
-      openmrsFetch,
+      [
+        'prescriptions-name-search',
+        `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequests&_getpagesoffset=0&_count=100&date=ge${dayjs()
+          .startOf('day')
+          .subtract(10, 'day')
+          .toISOString()}&status=ACTIVE&patientSearchTerm=bob`,
+      ],
+      expect.any(Function),
       { refreshInterval: 10000 },
     );
+    // and does not request the page itself
+    expect(useSWR).toHaveBeenCalledWith(null, openmrsFetch, { refreshInterval: 10000 });
   });
 
   test('usePrescriptionsTable should call all endpoint if status parameter is not active', () => {
     // @ts-ignore
-    useSWR.mockImplementation(() => ({ data: { data: 'mockedReturnData' } }));
+    useSWR.mockImplementation(swrReturning({ data: 'mockedReturnData' }));
     usePrescriptionsTable(true, '', '', 5, 5, 'bob', null, 10, 10000, allButtonsEnabled);
     expect(useSWR).toHaveBeenCalledWith(
-      `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequests&_getpagesoffset=5&_count=5&status=&patientSearchTerm=bob`,
+      [
+        'prescriptions-name-search',
+        `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequests&_getpagesoffset=0&_count=100&status=&patientSearchTerm=bob`,
+      ],
+      expect.any(Function),
+      { refreshInterval: 10000 },
+    );
+  });
+
+  test('usePrescriptionsTable should request the page itself when there is no search term', () => {
+    // @ts-ignore
+    useSWR.mockImplementation(swrReturning({ data: 'mockedReturnData' }));
+    usePrescriptionsTable(true, '', '', 5, 5, '', null, 10, 10000, allButtonsEnabled);
+    expect(useSWR).toHaveBeenCalledWith(
+      `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequests&_getpagesoffset=5&_count=5&status=`,
       openmrsFetch,
       { refreshInterval: 10000 },
     );
   });
 
+  test('usePrescriptionsTable should search each word of a multi-word name alone too', () => {
+    // @ts-ignore
+    useSWR.mockImplementation(swrReturning({ data: 'mockedReturnData' }));
+    usePrescriptionsTable(true, '', '', 5, 0, 'kumar karan', null, 10, 10000, allButtonsEnabled);
+    expect(useSWR).toHaveBeenCalledWith(
+      [
+        'prescriptions-name-search',
+        expect.stringContaining('patientSearchTerm=kumar karan'),
+        expect.stringMatching(/patientSearchTerm=kumar$/),
+        expect.stringMatching(/patientSearchTerm=karan$/),
+      ],
+      expect.any(Function),
+      { refreshInterval: 10000 },
+    );
+  });
+
+  test('usePrescriptionsTable should rank a name search by where the words are in the name, and page the ranking', () => {
+    const encounter = (id: string, name: string, created: string) => ({
+      resource: {
+        resourceType: 'Encounter',
+        id,
+        period: { start: created },
+        subject: { reference: `Patient/${id}`, display: `${name} (OpenMRS ID: 1, Age: 30)` },
+      },
+    });
+    const response = (...entries) => ({ data: { resourceType: 'Bundle', total: entries.length, entry: entries } });
+    const searches = [
+      response(
+        encounter('last-name', 'Ravi Sharma Kumar', '2023-01-05T10:00:00Z'),
+        encounter('karan-first', 'Karan Kumar', '2023-01-04T10:00:00Z'),
+        encounter('kumar-second', 'Anil Kumar Karan', '2023-01-06T10:00:00Z'),
+        encounter('kumar-first', 'Kumar Karan Singh', '2023-01-01T10:00:00Z'),
+      ),
+      response(
+        encounter('kumar-first', 'Kumar Karan Singh', '2023-01-01T10:00:00Z'),
+        encounter('kumar-only', 'Kumar Rao', '2023-01-07T10:00:00Z'),
+      ),
+      response(encounter('karan-only', 'Karan Rao', '2023-01-08T10:00:00Z')),
+    ];
+    // @ts-ignore
+    useSWR.mockImplementation((key) => (Array.isArray(key) ? { data: searches } : { data: undefined }));
+
+    const firstPage = usePrescriptionsTable(
+      true,
+      '',
+      'ACTIVE',
+      3,
+      0,
+      'kumar karan',
+      null,
+      10,
+      10000,
+      allButtonsEnabled,
+    );
+    const secondPage = usePrescriptionsTable(
+      true,
+      '',
+      'ACTIVE',
+      3,
+      3,
+      'kumar karan',
+      null,
+      10,
+      10000,
+      allButtonsEnabled,
+    );
+
+    // "kumar karan" in the order typed (first name first, then further in), then in the reverse order, then
+    // both words anywhere, then only one of them, the one nearest the start first and the newest among equals;
+    // the ranking is paged, and counts every match
+    expect(firstPage.prescriptionsTableRows.map((row) => row.id)).toEqual([
+      'kumar-first',
+      'kumar-second',
+      'karan-first',
+    ]);
+    expect(secondPage.prescriptionsTableRows.map((row) => row.id)).toEqual(['karan-only', 'kumar-only', 'last-name']);
+    expect(firstPage.totalOrders).toBe(6); // the patient both searches found counts once
+  });
+
   test('usePrescriptionsTable should include location uuids', () => {
     // @ts-ignore
-    useSWR.mockImplementation(() => ({ data: { data: 'mockedReturnData' } }));
+    useSWR.mockImplementation(swrReturning({ data: 'mockedReturnData' }));
     usePrescriptionsTable(
       true,
       '',
@@ -71,8 +174,11 @@ describe('Medication Request Resource Test', () => {
     );
 
     expect(useSWR).toHaveBeenCalledWith(
-      `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequests&_getpagesoffset=5&_count=5&status=&patientSearchTerm=bob&location=123,456`,
-      openmrsFetch,
+      [
+        'prescriptions-name-search',
+        `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequests&_getpagesoffset=0&_count=100&status=&patientSearchTerm=bob&location=123,456`,
+      ],
+      expect.any(Function),
       { refreshInterval: 10000 },
     );
   });
@@ -623,14 +729,14 @@ describe('Medication Request Resource Test', () => {
     };
 
     // @ts-ignore
-    useSWR.mockImplementation(() => ({ data: { data: queryResultsBundle } }));
+    useSWR.mockImplementation(swrReturning({ data: queryResultsBundle }));
     const { prescriptionsTableRows, totalOrders } = usePrescriptionsTable(
       true,
       '',
       'ACTIVE',
       2,
       0,
-      'bob',
+      '',
       [],
       90,
       10000,
