@@ -31,7 +31,7 @@ describe('Medication Request Resource Test', () => {
     useSWR.mockImplementation(() => ({ data: { data: 'mockedReturnData' } }));
     usePrescriptionsTable(true, '', 'ACTIVE', 5, 5, 'bob', null, 10, 10000, allButtonsEnabled);
     expect(useSWR).toHaveBeenCalledWith(
-      `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequests&_getpagesoffset=5&_count=5&date=ge${dayjs()
+      `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequestsByPatientName&_getpagesoffset=5&_count=5&date=ge${dayjs()
         .startOf('day')
         .subtract(10, 'day')
         .toISOString()}&status=ACTIVE&patientSearchTerm=bob`,
@@ -45,7 +45,7 @@ describe('Medication Request Resource Test', () => {
     useSWR.mockImplementation(() => ({ data: { data: 'mockedReturnData' } }));
     usePrescriptionsTable(true, '', '', 5, 5, 'bob', null, 10, 10000, allButtonsEnabled);
     expect(useSWR).toHaveBeenCalledWith(
-      `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequests&_getpagesoffset=5&_count=5&status=&patientSearchTerm=bob`,
+      `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequestsByPatientName&_getpagesoffset=5&_count=5&status=&patientSearchTerm=bob`,
       openmrsFetch,
       { refreshInterval: 10000 },
     );
@@ -71,7 +71,7 @@ describe('Medication Request Resource Test', () => {
     );
 
     expect(useSWR).toHaveBeenCalledWith(
-      `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequests&_getpagesoffset=5&_count=5&status=&patientSearchTerm=bob&location=123,456`,
+      `/ws/fhir2/R4/Encounter?_query=encountersWithMedicationRequestsByPatientName&_getpagesoffset=5&_count=5&status=&patientSearchTerm=bob&location=123,456`,
       openmrsFetch,
       { refreshInterval: 10000 },
     );
