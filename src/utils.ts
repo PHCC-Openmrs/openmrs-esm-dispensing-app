@@ -514,6 +514,30 @@ export function sortMedicationDispensesByWhenHandedOver(a: MedicationDispense, b
   }
 }
 
+/**
+ * A random v4 UUID. `crypto.randomUUID` only exists on secure pages (https or localhost), so
+ * this falls back to `crypto.getRandomValues`, which is available everywhere.
+ */
+export function generateUuid(): string {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * The reason to show for a failed request: the server's own message when it sent one (e.g.
+ * which batch ran out), otherwise the fallback if given, otherwise the generic fetch error.
+ */
+export function getErrorMessage(error: { message?: string; responseBody?: unknown }, fallback?: string): string {
+  const responseBody = error?.responseBody as { error?: { message?: string } } | undefined;
+  return responseBody?.error?.message || fallback || error?.message;
+}
+
 // we assume this is a free text dosage if none of the following are specified
 export function calculateIsFreeTextDosage(dosageInstruction: DosageInstruction | null) {
   return (

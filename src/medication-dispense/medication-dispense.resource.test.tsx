@@ -4,17 +4,19 @@ import isToday from 'dayjs/plugin/isToday';
 import useSWR from 'swr';
 import { openmrsFetch, type Session } from '@openmrs/esm-framework';
 import {
-  deleteMedicationDispense,
+  deleteDispense,
   initiateMedicationDispenseBody,
-  saveMedicationDispense,
+  saveDispenses,
   useOrderConfig,
   useSubstitutionReasonValueSet,
   useSubstitutionTypeValueSet,
 } from './medication-dispense.resource';
 import {
+  type DispenseRequestItem,
   type MedicationDispense,
   type MedicationRequest,
   MedicationDispenseStatus,
+  MedicationRequestFulfillerStatus,
   MedicationRequestStatus,
   type Provider,
 } from '../types';
@@ -25,75 +27,65 @@ vi.mocked(openmrsFetch);
 vi.mock('swr');
 
 describe('Medication Dispense Resource tests', () => {
-  test('saveMedicationDispense should call medication dispense FHIR endpoint with appropriate data and method POST', () => {
-    const medicationDispense: MedicationDispense = {
-      dosageInstruction: undefined,
-      id: '',
-      location: { display: '', reference: '', type: '' },
-      medicationReference: { display: '', reference: '', type: '' },
-      meta: { lastUpdated: '' },
-      quantity: undefined,
-      performer: undefined,
-      resourceType: 'MedicationDispense',
-      status: null,
-      subject: { display: '', reference: '', type: '' },
-      substitution: { reason: [], type: undefined, wasSubstituted: false },
-      type: undefined,
-      whenHandedOver: '',
-      whenPrepared: '',
-    };
-    const abortController: AbortController = {
-      signal: undefined,
-      abort(): void {},
-    };
+  test('saveDispenses sends every dispense in one request to the stock management dispense endpoint', () => {
+    const dispenses: Array<DispenseRequestItem> = [
+      {
+        medicationDispense: {
+          resourceType: 'MedicationDispense',
+          id: 'new-dispense-uuid',
+          status: MedicationDispenseStatus.completed,
+        } as MedicationDispense,
+        fulfillerStatus: MedicationRequestFulfillerStatus.completed,
+        restrictTotalQuantityDispensed: true,
+        stock: [
+          {
+            dispenseLocation: 'location-uuid',
+            stockItem: 'stock-item-uuid',
+            stockBatch: 'stock-batch-uuid',
+            stockItemPackagingUOM: 'uom-uuid',
+            quantity: 30,
+          },
+        ],
+      },
+      {
+        medicationDispense: {
+          resourceType: 'MedicationDispense',
+          id: 'paused-dispense-uuid',
+          status: MedicationDispenseStatus.on_hold,
+        } as MedicationDispense,
+        update: true,
+      },
+    ];
+    const abortController = new AbortController();
 
-    saveMedicationDispense(medicationDispense, MedicationDispenseStatus.completed, abortController);
-    expect(openmrsFetch).toHaveBeenCalledWith('/ws/fhir2/R4/MedicationDispense', {
+    saveDispenses(dispenses, abortController);
+
+    expect(openmrsFetch).toHaveBeenCalledWith('/ws/rest/v1/stockmanagement/dispense', {
       method: 'POST',
       signal: abortController.signal,
       headers: {
         'Content-Type': 'application/json',
       },
-      body: medicationDispense,
+      body: { dispenses },
     });
   });
 
-  test('saveMedicationDispense should call medication dispense FHIR endpoint with appropriate data and method PUT', () => {
-    const medicationDispense: MedicationDispense = {
-      dosageInstruction: undefined,
-      id: '123abc',
-      location: { display: '', reference: '', type: '' },
-      medicationReference: { display: '', reference: '', type: '' },
-      meta: { lastUpdated: '' },
-      performer: undefined,
-      quantity: undefined,
-      resourceType: 'MedicationDispense',
-      status: null,
-      subject: { display: '', reference: '', type: '' },
-      substitution: { reason: [], type: undefined, wasSubstituted: false },
-      type: undefined,
-      whenHandedOver: '',
-      whenPrepared: '',
-    };
-    const abortController: AbortController = {
-      signal: undefined,
-      abort(): void {},
-    };
+  test('deleteDispense sends the prescription status change along with the delete', () => {
+    deleteDispense('123abc', { fulfillerStatus: null });
 
-    saveMedicationDispense(medicationDispense, MedicationDispenseStatus.completed, abortController);
-    expect(openmrsFetch).toHaveBeenCalledWith('/ws/fhir2/R4/MedicationDispense/123abc', {
-      method: 'PUT',
-      signal: abortController.signal,
+    expect(openmrsFetch).toHaveBeenCalledWith('/ws/rest/v1/stockmanagement/dispense/123abc', {
+      method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: medicationDispense,
+      body: { fulfillerStatus: null },
     });
   });
 
-  test('deleteMedicationDispense should call medication request FHIR endpoint with appropriate uuid and method DELETE', () => {
-    deleteMedicationDispense('123abc');
-    expect(openmrsFetch).toHaveBeenCalledWith('/ws/fhir2/R4/MedicationDispense/123abc', { method: 'DELETE' });
+  test('deleteDispense without a status change sends a plain DELETE', () => {
+    deleteDispense('123abc');
+
+    expect(openmrsFetch).toHaveBeenCalledWith('/ws/rest/v1/stockmanagement/dispense/123abc', { method: 'DELETE' });
   });
 
   test('useOrderConfig should fetch order config via SWR', () => {

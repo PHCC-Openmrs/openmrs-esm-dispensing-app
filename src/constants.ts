@@ -15,8 +15,6 @@ export const PRIVILEGE_EDIT_DISPENSE = 'Task: dispensing.edit.dispense';
 export const PRIVILEGE_DELETE_DISPENSE = 'Task: dispensing.delete.dispense';
 export const PRIVILEGE_DELETE_DISPENSE_THIS_PROVIDER_ONLY = 'Task: dispensing.delete.dispense.ifCreator';
 
-export const JSON_MERGE_PATH_MIME_TYPE = 'application/merge-patch+json';
-
 export const PRESCRIPTIONS_TABLE_ENDPOINT = 'Encounter?_query=encountersWithMedicationRequests';
 
 export const PRESCRIPTION_DETAILS_ENDPOINT = 'MedicationRequest';

@@ -519,15 +519,28 @@ export type InventoryItem = {
   resourceVersion: string;
 };
 
-export type StockDispenseRequest = {
+/** How much of a dispense comes out of one batch, in that batch's packaging unit. */
+export type DispenseStockLine = {
   dispenseLocation: string;
-  patient: string;
-  order: string;
-  encounter: string;
   stockItem: string;
   stockBatch: string;
   stockItemPackagingUOM: string;
   quantity: number;
+};
+
+/**
+ * One dispense as sent to the stock management dispense endpoint, which saves the dispense,
+ * the prescription's fulfiller status and the stock it takes in a single transaction.
+ */
+export type DispenseRequestItem = {
+  medicationDispense: MedicationDispense;
+  /** only set when editing a dispense that has already been saved */
+  update?: boolean;
+  /** leaving it out keeps the prescription's fulfiller status as it is; null clears it */
+  fulfillerStatus?: MedicationRequestFulfillerStatus | null;
+  restrictTotalQuantityDispensed?: boolean;
+  /** the batches a completed dispense is taken from; paused and closed dispenses take none */
+  stock?: Array<DispenseStockLine>;
 };
 
 export interface DispensingStore {

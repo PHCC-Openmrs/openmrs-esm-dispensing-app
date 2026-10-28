@@ -12,20 +12,29 @@ import {
   Workspace2,
   type Workspace2DefinitionProps,
 } from '@openmrs/esm-framework';
-import { type MedicationDispense, type MedicationRequestBundle, type InventoryItem } from '../types';
-import { calculateIsFreeTextDosage, getDosageInstruction, markEncounterAsStale, revalidate } from '../utils';
+import {
+  type MedicationDispense,
+  MedicationDispenseStatus,
+  type MedicationRequestBundle,
+  type InventoryItem,
+} from '../types';
+import {
+  calculateIsFreeTextDosage,
+  generateUuid,
+  getDosageInstruction,
+  getErrorMessage,
+  markEncounterAsStale,
+  revalidate,
+} from '../utils';
 import { type PharmacyConfig } from '../config-schema';
 import { notifyIfPrescriptionFulfillmentComplete } from '../pharmacy-queue-notification';
+import { allocateQuantityAcrossBatches, createDispenseStockLines } from './stock-dispense/stock.resource';
 import {
-  allocateQuantityAcrossBatches,
-  createStockDispenseRequestPayload,
-  sendStockDispenseRequest,
-} from './stock-dispense/stock.resource';
-import {
-  completeMedicationDispense,
+  buildCompletedDispenseItem,
   findDuplicateDispense,
   isMedicationDispenseValid,
 } from '../medication-dispense/complete-medication-dispense';
+import { saveDispenses } from '../medication-dispense/medication-dispense.resource';
 import MedicationDispenseReview from './medication-dispense-review.component';
 import StockDispense from './stock-dispense/stock-dispense.component';
 import styles from './forms.scss';
@@ -70,6 +79,12 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
   // to prevent duplicate submits
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // The id a new dispense is saved under, fixed for as long as this form is open. If the
+  // connection drops after the server saved the dispense, pressing Dispense again sends the
+  // same id, and the server answers with the dispense it already has instead of saving it, and
+  // taking its stock, twice.
+  const [newDispenseId] = useState(generateUuid);
+
   const [isFreeTextDosage, setIsFreeTextDosage] = useState(() => {
     const dosageInstruction = getDosageInstruction(medicationDispense?.dosageInstruction);
     return dosageInstruction ? calculateIsFreeTextDosage(dosageInstruction) : false;
@@ -98,7 +113,9 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
     });
   };
 
-  // Submit medication dispense form
+  // Submit medication dispense form. The dispense, its stock and the prescription's status are
+  // saved by one request in one transaction, so on any error nothing has been saved and the
+  // form stays open to try again.
   const handleSubmit = () => {
     if (isSubmitting) {
       return Promise.resolve();
@@ -106,39 +123,25 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
     setIsSubmitting(true);
     const abortController = new AbortController();
     markEncounterAsStale(encounterUuid);
-    return completeMedicationDispense(medicationDispensePayload, medicationRequestBundle, config, abortController)
-      .then((response) => {
-        const { status } = response;
-        if (config.enableStockDispense && (status === 201 || status === 200)) {
-          const stockDispenseRequestPayload = createStockDispenseRequestPayload(
-            batchAllocation.allocations,
-            patientUuid,
-            encounterUuid,
-            medicationDispensePayload,
-          );
-          sendStockDispenseRequest(stockDispenseRequestPayload, abortController).then(
-            () => {
-              showSnackbar({
-                title: t('stockDispensed', 'Stock dispensed'),
-                kind: 'success',
-                subtitle: t('stockDispensedSuccessfully', 'Stock dispensed successfully and batch level updated.'),
-              });
-            },
-            (error) => {
-              showSnackbar({
-                title: 'Stock dispense error',
-                kind: 'error',
-                subtitle: error?.message,
-              });
-            },
-          );
-        }
-        return response;
-      })
+    return Promise.resolve()
+      .then(() =>
+        saveDispenses(
+          [
+            buildCompletedDispenseItem(
+              medicationDispensePayload,
+              medicationRequestBundle,
+              config,
+              newDispenseId,
+              createDispenseStockLines(batchAllocation.allocations),
+            ),
+          ],
+          abortController,
+        ),
+      )
       .then(
         (response) => {
-          const { status } = response;
-          if (config.completeOrderWithThisDispense && response?.data?.status === 'completed') {
+          const [savedDispense] = response.data?.dispenses ?? [];
+          if (config.completeOrderWithThisDispense && savedDispense?.status === MedicationDispenseStatus.completed) {
             showSnackbar({
               title: t('prescriptionCompleted', 'Prescription completed'),
               kind: 'success',
@@ -148,27 +151,30 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
               ),
             });
           }
-          if (status === 201 || status === 200) {
-            revalidate(mutate, encounterUuid);
-            notifyIfPrescriptionFulfillmentComplete(
-              encounterUuid,
-              patientUuid,
-              config.medicationRequestExpirationPeriodInDays,
-            );
-            showSnackbar({
-              kind: 'success',
-              subtitle: t('medicationListUpdated', 'Medication dispense list has been updated.'),
-              title: t(
-                mode === 'enter' ? 'medicationDispensed' : 'medicationDispenseUpdated',
-                mode === 'enter'
-                  ? 'Medication successfully dispensed.'
-                  : 'Medication dispense record successfully updated.',
-              ),
-            });
-            closeWorkspace({ discardUnsavedChanges: true });
-            setIsSubmitting(false);
-            onWorkspaceClosed?.();
-          }
+          revalidate(mutate, encounterUuid);
+          notifyIfPrescriptionFulfillmentComplete(
+            encounterUuid,
+            patientUuid,
+            config.medicationRequestExpirationPeriodInDays,
+          );
+          showSnackbar({
+            title: t('stockDispensed', 'Stock dispensed'),
+            kind: 'success',
+            subtitle: t('stockDispensedSuccessfully', 'Stock dispensed successfully and batch level updated.'),
+          });
+          showSnackbar({
+            kind: 'success',
+            subtitle: t('medicationListUpdated', 'Medication dispense list has been updated.'),
+            title: t(
+              mode === 'enter' ? 'medicationDispensed' : 'medicationDispenseUpdated',
+              mode === 'enter'
+                ? 'Medication successfully dispensed.'
+                : 'Medication dispense record successfully updated.',
+            ),
+          });
+          closeWorkspace({ discardUnsavedChanges: true });
+          setIsSubmitting(false);
+          onWorkspaceClosed?.();
         },
         (error) => {
           showSnackbar({
@@ -177,7 +183,7 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
               mode === 'enter' ? 'medicationDispenseError' : 'medicationDispenseUpdatedError',
               mode === 'enter' ? 'Error dispensing medication.' : 'Error updating dispense record',
             ),
-            subtitle: error?.message,
+            subtitle: getErrorMessage(error),
           });
           setIsSubmitting(false);
         },
@@ -197,16 +203,16 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
     [isFreeTextDosage, medicationDispensePayload],
   );
 
-  // How the dispense quantity splits across the selected batches. The dispense is blocked
-  // until the selection holds enough, since the stock call would otherwise be rejected
-  // after the medication dispense itself has already been saved.
+  // How the dispense quantity splits across the selected batches. Every dispense takes its
+  // stock, so it is blocked until the selection holds enough; the server would reject it
+  // otherwise.
   const batchAllocation = useMemo(
     () => allocateQuantityAcrossBatches(inventoryItems, medicationDispensePayload?.quantity?.value),
     [inventoryItems, medicationDispensePayload?.quantity?.value],
   );
   const isStockSelectionValid = batchAllocation.allocations.length > 0 && batchAllocation.shortfall <= 0;
 
-  const isButtonDisabled = (config.enableStockDispense ? !isStockSelectionValid : false) || !isValid || isSubmitting;
+  const isButtonDisabled = !isStockSelectionValid || !isValid || isSubmitting;
 
   const handleSubmitOrDuplicateCheck = () => {
     const duplicateDispense = medicationDispensePayload ? getDuplicateDispense(medicationDispensePayload) : null;
@@ -256,14 +262,12 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
                   quantityRemaining={quantityRemaining}
                   quantityDispensed={quantityDispensed}
                 />
-                {config.enableStockDispense && (
-                  <StockDispense
-                    inventoryItems={inventoryItems}
-                    medicationDispense={medicationDispense}
-                    quantityToDispense={medicationDispensePayload.quantity?.value}
-                    updateInventoryItems={setInventoryItems}
-                  />
-                )}
+                <StockDispense
+                  inventoryItems={inventoryItems}
+                  medicationDispense={medicationDispense}
+                  quantityToDispense={medicationDispensePayload.quantity?.value}
+                  updateInventoryItems={setInventoryItems}
+                />
               </div>
             ) : null}
           </section>

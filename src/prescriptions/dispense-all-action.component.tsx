@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useSWRConfig } from 'swr';
 import { useTranslation } from 'react-i18next';
 import { Button, InlineNotification, Modal } from '@carbon/react';
@@ -7,7 +7,9 @@ import { type InventoryItem, type MedicationDispense, type MedicationRequestBund
 import { type PharmacyConfig } from '../config-schema';
 import {
   calculateIsFreeTextDosage,
+  generateUuid,
   getDosageInstruction,
+  getErrorMessage,
   getMedicationDisplay,
   getMedicationReferenceOrCodeableConcept,
   getUuidFromReference,
@@ -15,16 +17,19 @@ import {
   revalidate,
 } from '../utils';
 import { computePrescriptionState, PrescriptionState } from '../prescription-state';
-import { initiateMedicationDispenseBody, useProviders } from '../medication-dispense/medication-dispense.resource';
 import {
-  completeMedicationDispense,
+  initiateMedicationDispenseBody,
+  saveDispenses,
+  useProviders,
+} from '../medication-dispense/medication-dispense.resource';
+import {
+  buildCompletedDispenseItem,
   findDuplicateDispense,
   isMedicationDispenseValid,
 } from '../medication-dispense/complete-medication-dispense';
 import {
-  createStockDispenseRequestPayload,
+  createDispenseStockLines,
   getDispensableBatches,
-  sendStockDispenseRequest,
   useDispenseStockForDrugs,
 } from '../forms/stock-dispense/stock.resource';
 import { notifyIfPrescriptionFulfillmentComplete } from '../pharmacy-queue-notification';
@@ -33,7 +38,7 @@ export type DispenseAllItem = {
   medicationRequestBundle: MedicationRequestBundle;
   medicationDispense: MedicationDispense;
   drugUuid: string | undefined;
-  /** The earliest-expiring dispensable batch; only set when stock dispensing is enabled. */
+  /** The earliest-expiring dispensable batch, if the drug has one. */
   batch?: InventoryItem;
 };
 
@@ -44,9 +49,9 @@ export type DispenseAllItem = {
  * dispense the Dispense button would pre-fill. "Dispense all" is only offered when none of
  * them needs a human decision:
  *  - each pre-filled dispense is already valid (dispenser, quantity, dosage), and
- *  - with stock dispensing on, the earliest-expiring eligible batch of each drug holds enough
- *    for everything being dispensed of that drug. A prescription that would need a second
- *    batch, or has no stock, goes through the normal Dispense form instead.
+ *  - the earliest-expiring eligible batch of each drug holds enough for everything being
+ *    dispensed of that drug, counting whole units only. A prescription that would need a
+ *    second batch, or has no stock, goes through the normal Dispense form instead.
  */
 export function planDispenseAll(
   medicationRequestBundles: Array<MedicationRequestBundle>,
@@ -74,10 +79,9 @@ export function planDispenseAll(
       const drugUuid = medicationDispense.medicationReference?.reference
         ? getUuidFromReference(medicationDispense.medicationReference.reference)
         : undefined;
-      const batch =
-        config.enableStockDispense && drugUuid
-          ? getDispensableBatches(medicationDispense, inventoryItemsByDrug[drugUuid] ?? [], config.validateBatch)[0]
-          : undefined;
+      const batch = drugUuid
+        ? getDispensableBatches(medicationDispense, inventoryItemsByDrug[drugUuid] ?? [], config.validateBatch)[0]
+        : undefined;
       return { medicationRequestBundle, medicationDispense, drugUuid, batch };
     });
 
@@ -98,9 +102,9 @@ export function planDispenseAll(
       );
     }
   });
-  const stockCovered =
-    !config.enableStockDispense ||
-    items.every(({ batch }) => batch && batch.quantity >= neededByBatch.get(batch.stockBatchUuid));
+  const stockCovered = items.every(
+    ({ batch }) => batch && Math.floor(batch.quantity) >= neededByBatch.get(batch.stockBatchUuid),
+  );
 
   return { items, canDispenseAll: items.length > 1 && allValid && stockCovered };
 }
@@ -126,6 +130,18 @@ const DispenseAllAction: React.FC<DispenseAllActionProps> = ({
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // The id each prescription's dispense is saved under, kept until "Dispense all" succeeds. If
+  // the connection drops after the server saved them, confirming again sends the same ids and
+  // the server answers with the dispenses it already has instead of saving them twice.
+  const dispenseIds = useRef(new Map<string, string>());
+  const getDispenseId = (medicationRequestBundle: MedicationRequestBundle) => {
+    const requestId = medicationRequestBundle.request.id;
+    if (!dispenseIds.current.has(requestId)) {
+      dispenseIds.current.set(requestId, generateUuid());
+    }
+    return dispenseIds.current.get(requestId);
+  };
+
   const drugUuids = useMemo(
     () =>
       (medicationRequestBundles ?? [])
@@ -134,11 +150,7 @@ const DispenseAllAction: React.FC<DispenseAllActionProps> = ({
         .map(getUuidFromReference),
     [medicationRequestBundles],
   );
-  const {
-    inventoryItemsByDrug,
-    isLoading: isLoadingStock,
-    error: stockError,
-  } = useDispenseStockForDrugs(config.enableStockDispense ? drugUuids : []);
+  const { inventoryItemsByDrug, isLoading: isLoadingStock, error: stockError } = useDispenseStockForDrugs(drugUuids);
 
   const { items, canDispenseAll } = planDispenseAll(
     medicationRequestBundles,
@@ -150,7 +162,7 @@ const DispenseAllAction: React.FC<DispenseAllActionProps> = ({
 
   // while stock is still loading (or failed to load) its availability is unknown, so the
   // button stays hidden rather than appearing and then vanishing
-  if (!canDispenseAll || (config.enableStockDispense && (isLoadingStock || stockError))) {
+  if (!canDispenseAll || isLoadingStock || stockError) {
     return null;
   }
 
@@ -165,87 +177,53 @@ const DispenseAllAction: React.FC<DispenseAllActionProps> = ({
     const abortController = new AbortController();
     markEncounterAsStale(encounterUuid);
 
-    // Rebuilt at submit time so the handed-over time is when the pharmacist confirmed, not
-    // when the page rendered.
-    const toDispense = items.map((item) => ({
-      ...item,
-      medicationDispense: initiateMedicationDispenseBody(
-        item.medicationRequestBundle.request,
-        session,
-        providers,
-        true,
-      ),
-    }));
-
-    // One at a time, so a failure part way through leaves a clear record of what was saved.
-    const saved: Array<DispenseAllItem> = [];
-    const failed: Array<string> = [];
-    for (const item of toDispense) {
-      const name = getMedicationDisplay(getMedicationReferenceOrCodeableConcept(item.medicationDispense));
-      try {
-        const response = await completeMedicationDispense(
-          item.medicationDispense,
+    try {
+      // Every medication goes in one request, which the backend saves in one transaction:
+      // either all of them are dispensed with their stock taken, or none is. The dispenses are
+      // rebuilt here so the handed-over time is when the pharmacist confirmed, not when the
+      // page rendered.
+      const dispenses = items.map((item) => {
+        const medicationDispense = initiateMedicationDispenseBody(
+          item.medicationRequestBundle.request,
+          session,
+          providers,
+          true,
+        );
+        return buildCompletedDispenseItem(
+          medicationDispense,
           item.medicationRequestBundle,
           config,
-          abortController,
+          getDispenseId(item.medicationRequestBundle),
+          createDispenseStockLines([{ inventoryItem: item.batch, quantity: medicationDispense.quantity.value }]),
         );
-        if (response.ok) {
-          saved.push(item);
-        } else {
-          failed.push(name);
-        }
-      } catch {
-        failed.push(name);
-      }
-    }
+      });
+      await saveDispenses(dispenses, abortController);
 
-    // Stock for every saved dispense goes in a single request, which the backend applies in
-    // one transaction.
-    if (config.enableStockDispense && saved.length > 0) {
-      const stockDispenseRequests = saved.flatMap(({ batch, medicationDispense }) =>
-        createStockDispenseRequestPayload(
-          [{ inventoryItem: batch, quantity: medicationDispense.quantity.value }],
-          patientUuid,
-          encounterUuid,
-          medicationDispense,
-        ),
-      );
-      try {
-        await sendStockDispenseRequest(stockDispenseRequests, abortController);
-        showSnackbar({
-          title: t('stockDispensed', 'Stock dispensed'),
-          kind: 'success',
-          subtitle: t('stockDispensedSuccessfully', 'Stock dispensed successfully and batch level updated.'),
-        });
-      } catch (error) {
-        showSnackbar({
-          title: t('stockDispenseError', 'Stock dispense error'),
-          kind: 'error',
-          subtitle: error?.message,
-        });
-      }
-    }
-
-    revalidate(mutate, encounterUuid);
-    if (saved.length > 0) {
+      dispenseIds.current.clear();
       notifyIfPrescriptionFulfillmentComplete(
         encounterUuid,
         patientUuid,
         config.medicationRequestExpirationPeriodInDays,
       );
       showSnackbar({
+        title: t('stockDispensed', 'Stock dispensed'),
         kind: 'success',
-        title: t('medicationsDispensed', '{{count}} medications dispensed', { count: saved.length }),
+        subtitle: t('stockDispensedSuccessfully', 'Stock dispensed successfully and batch level updated.'),
+      });
+      showSnackbar({
+        kind: 'success',
+        title: t('medicationsDispensed', '{{count}} medications dispensed', { count: dispenses.length }),
         subtitle: t('medicationListUpdated', 'Medication dispense list has been updated.'),
       });
-    }
-    if (failed.length > 0) {
+    } catch (error) {
       showSnackbar({
         kind: 'error',
-        title: t('dispenseAllPartialError', 'Some medications could not be dispensed'),
-        subtitle: failed.join(', '),
+        title: t('dispenseAllError', 'Nothing was dispensed'),
+        subtitle: getErrorMessage(error),
       });
     }
+    // reloaded either way: after a failure the stock shown may be what made it fail
+    revalidate(mutate, encounterUuid);
     setIsSubmitting(false);
     setIsConfirmOpen(false);
   };

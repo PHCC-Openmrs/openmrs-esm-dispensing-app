@@ -1,7 +1,6 @@
 import useSWR from 'swr';
 import { openmrsFetch, useSession } from '@openmrs/esm-framework';
-import { type StockDispenseRequest, type InventoryItem, type MedicationDispense } from '../../types';
-import { getUuidFromReference } from '../../utils';
+import { type DispenseStockLine, type InventoryItem, type MedicationDispense } from '../../types';
 
 //TODO: Add configuration to retrieve the stock dispense endpoint
 // For stock dispense to work, stock management module should be installed and configured
@@ -45,27 +44,6 @@ export const useDispenseStockForDrugs = (drugUuids: Array<string>) => {
   );
   return { inventoryItemsByDrug: data ?? {}, error, isLoading };
 };
-
-/**
- * Sends a POST request to the inventory dispense endpoint with the provided stock dispense request.
- *
- * @param {AbortController} abortController - The AbortController used to cancel the request.
- * @returns {Promise<Response>} - A Promise that resolves to the response of the POST request.
- */
-export async function sendStockDispenseRequest(
-  stockDispenseRequests: Array<StockDispenseRequest>,
-  abortController: AbortController,
-): Promise<Response> {
-  const url = '/ws/rest/v1/stockmanagement/dispenserequest';
-  return await openmrsFetch(url, {
-    method: 'POST',
-    signal: abortController.signal,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ dispenseItems: stockDispenseRequests }),
-  });
-}
 
 // Applies a FHIR duration unit to a date, so a course length can be projected forward.
 const durationUnitAppliers: Record<string, (date: Date, value: number) => void> = {
@@ -172,6 +150,10 @@ export type BatchAllocation = {
  * may hold less than the prescription needs; the backend rejects any single line that would
  * take a batch below zero, so each batch is only ever asked for what it actually holds.
  *
+ * Only whole units of a batch count, the same as the batch list shows them. A fraction left
+ * behind by an earlier rounding (a batch holding 0.01, shown as "Quantity: 0") is never
+ * allocated, since a line for it is rejected and with it the whole dispense.
+ *
  * `shortfall` is what is left over once every selected batch is used up. Anything above zero
  * means the selection cannot cover the dispense and it must not be submitted.
  */
@@ -185,7 +167,7 @@ export function allocateQuantityAcrossBatches(
     if (remaining <= 0) {
       break;
     }
-    const available = inventoryItem.quantity > 0 ? inventoryItem.quantity : 0;
+    const available = inventoryItem.quantity > 0 ? Math.floor(inventoryItem.quantity) : 0;
     const quantity = Math.min(available, remaining);
     if (quantity > 0) {
       allocations.push({ inventoryItem, quantity });
@@ -196,31 +178,16 @@ export function allocateQuantityAcrossBatches(
 }
 
 /**
- * Creates the stock dispense request payload: one dispense line per batch the quantity was
- * allocated to. The backend applies all lines in one transaction, so a multi-batch dispense
- * either reduces every batch or none of them.
- *
- * @param allocations - How much to take from each batch.
- * @param patientUuid - The UUID of the patient.
- * @param encounterUuid - The UUID of the encounter.
- * @param medicationDispensePayload - The medication dispense payload.
- * @returns The stock dispense request lines.
+ * The stock lines of a dispense: one per batch the quantity was allocated to. They travel with
+ * the dispense itself, and the backend saves both in one transaction, so a multi-batch dispense
+ * either reduces every batch and is recorded, or does neither. The patient, prescription and
+ * encounter the stock is issued against are taken from the dispense on the server.
  */
-export const createStockDispenseRequestPayload = (
-  allocations: Array<BatchAllocation>,
-  patientUuid: string,
-  encounterUuid: string,
-  medicationDispensePayload: MedicationDispense,
-): Array<StockDispenseRequest> => {
-  const order = getUuidFromReference(medicationDispensePayload.authorizingPrescription[0].reference);
-  return allocations.map(({ inventoryItem, quantity }) => ({
+export const createDispenseStockLines = (allocations: Array<BatchAllocation>): Array<DispenseStockLine> =>
+  allocations.map(({ inventoryItem, quantity }) => ({
     dispenseLocation: inventoryItem.locationUuid,
-    patient: patientUuid,
-    order,
-    encounter: encounterUuid,
     stockItem: inventoryItem.stockItemUuid,
     stockBatch: inventoryItem.stockBatchUuid,
     stockItemPackagingUOM: inventoryItem.quantityUoMUuid,
     quantity,
   }));
-};

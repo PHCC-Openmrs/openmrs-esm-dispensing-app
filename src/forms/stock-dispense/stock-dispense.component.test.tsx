@@ -206,6 +206,29 @@ describe('allocateQuantityAcrossBatches', () => {
   test('reports the shortfall when the selection cannot cover the quantity', () => {
     expect(allocateQuantityAcrossBatches([batchA, batchB], 50).shortfall).toBe(10);
   });
+
+  test('never allocates a fraction of a unit left behind in a batch', () => {
+    // a batch holding 0.01 is listed as "Quantity: 0"; a line for it would be rejected, and
+    // with it the whole dispense
+    const crumb = createInventoryItem({ stockBatchUuid: 'crumb', batchNumber: 'CRUMB', quantity: 0.01 });
+
+    const { allocations, shortfall } = allocateQuantityAcrossBatches([crumb, batchA], 15);
+
+    expect(allocations).toEqual([{ inventoryItem: batchA, quantity: 15 }]);
+    expect(shortfall).toBe(0);
+  });
+
+  test('counts only the whole units of a batch', () => {
+    const partial = createInventoryItem({ stockBatchUuid: 'partial', batchNumber: 'PARTIAL', quantity: 10.99 });
+
+    const { allocations, shortfall } = allocateQuantityAcrossBatches([partial, batchA], 15);
+
+    expect(allocations.map((a) => [a.inventoryItem.batchNumber, a.quantity])).toEqual([
+      ['PARTIAL', 10],
+      ['A', 5],
+    ]);
+    expect(shortfall).toBe(0);
+  });
 });
 
 describe('StockDispense multi-batch selection', () => {

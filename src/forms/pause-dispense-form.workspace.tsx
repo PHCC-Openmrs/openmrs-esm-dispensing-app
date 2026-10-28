@@ -12,9 +12,9 @@ import {
   Workspace2,
   type Workspace2DefinitionProps,
 } from '@openmrs/esm-framework';
-import { saveMedicationDispense, useReasonForPauseValueSet } from '../medication-dispense/medication-dispense.resource';
-import { updateMedicationRequestFulfillerStatus } from '../medication-request/medication-request.resource';
-import { getUuidFromReference, markEncounterAsStale, revalidate } from '../utils';
+import { saveDispenses, useReasonForPauseValueSet } from '../medication-dispense/medication-dispense.resource';
+import { buildPausedOrClosedDispenseItem } from '../medication-dispense/complete-medication-dispense';
+import { generateUuid, getErrorMessage, markEncounterAsStale, revalidate } from '../utils';
 import { type MedicationDispense, MedicationDispenseStatus, MedicationRequestFulfillerStatus } from '../types';
 import { type PharmacyConfig } from '../config-schema';
 import styles from './forms.scss';
@@ -44,6 +44,9 @@ const PauseDispenseForm: React.FC<Workspace2DefinitionProps<PauseDispenseFormPro
 
   // to prevent duplicate submits
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // a new pause is saved under this id for as long as the form is open, so a resubmit after a
+  // lost response is recognised instead of saved twice
+  const [newDispenseId] = useState(generateUuid);
   const [reasonsForPause, setReasonsForPause] = useState([]);
   const { reasonForPauseValueSet } = useReasonForPauseValueSet(config.valueSets.reasonForPause.uuid);
 
@@ -70,32 +73,28 @@ const PauseDispenseForm: React.FC<Workspace2DefinitionProps<PauseDispenseFormPro
       setIsSubmitting(true);
       const abortController = new AbortController();
       markEncounterAsStale(encounterUuid);
-      saveMedicationDispense(medicationDispensePayload, MedicationDispenseStatus.on_hold, abortController)
-        .then((response) => {
-          // only update request status when added a new dispense event, not updating
-          if (response.ok && !medicationDispense.id) {
-            return updateMedicationRequestFulfillerStatus(
-              getUuidFromReference(
-                medicationDispensePayload.authorizingPrescription[0].reference, // assumes authorizing prescription exist
-              ),
-              MedicationRequestFulfillerStatus.on_hold,
-            );
-          } else {
-            return response;
-          }
-        })
-        .then((response) => {
-          if (response.ok) {
-            revalidate(mutate, encounterUuid);
-            showSnackbar({
-              kind: 'success',
-              title: t(
-                mode === 'enter' ? 'medicationDispensePaused' : 'medicationDispenseUpdated',
-                mode === 'enter' ? 'Medication dispense paused.' : 'Dispense record successfully updated.',
-              ),
-            });
-            closeWorkspace({ discardUnsavedChanges: true });
-          }
+      // the pause and, for a new one, the prescription's on-hold status are saved together
+      saveDispenses(
+        [
+          buildPausedOrClosedDispenseItem(
+            medicationDispensePayload,
+            MedicationDispenseStatus.on_hold,
+            MedicationRequestFulfillerStatus.on_hold,
+            newDispenseId,
+          ),
+        ],
+        abortController,
+      )
+        .then(() => {
+          revalidate(mutate, encounterUuid);
+          showSnackbar({
+            kind: 'success',
+            title: t(
+              mode === 'enter' ? 'medicationDispensePaused' : 'medicationDispenseUpdated',
+              mode === 'enter' ? 'Medication dispense paused.' : 'Dispense record successfully updated.',
+            ),
+          });
+          closeWorkspace({ discardUnsavedChanges: true });
         })
         .catch((error) => {
           showSnackbar({
@@ -104,7 +103,7 @@ const PauseDispenseForm: React.FC<Workspace2DefinitionProps<PauseDispenseFormPro
               mode === 'enter' ? 'Error pausing medication dispense.' : 'Error updating dispense record',
             ),
             kind: 'error',
-            subtitle: error?.message,
+            subtitle: getErrorMessage(error),
           });
           setIsSubmitting(false);
         });

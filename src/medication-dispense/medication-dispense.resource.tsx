@@ -2,45 +2,51 @@ import dayjs from 'dayjs';
 import useSWR from 'swr';
 import { fhirBaseUrl, restBaseUrl, openmrsFetch, type Session } from '@openmrs/esm-framework';
 import {
+  type DispenseRequestItem,
   type MedicationDispense,
-  type MedicationDispenseStatus,
   type MedicationRequest,
+  type MedicationRequestFulfillerStatus,
   type OrderConfig,
   type Provider,
   type ProviderRequestResponse,
   type ValueSet,
 } from '../types';
 
-export function saveMedicationDispense(
-  medicationDispense: MedicationDispense,
-  medicationDispenseStatus: MedicationDispenseStatus,
-  abortController?: AbortController,
-) {
-  // if we have an id, this is an update, otherwise it's a create
-  const url = medicationDispense.id
-    ? `${fhirBaseUrl}/MedicationDispense/${medicationDispense.id}`
-    : `${fhirBaseUrl}/MedicationDispense`;
+const dispenseUrl = `${restBaseUrl}/stockmanagement/dispense`;
 
-  const method = medicationDispense.id ? 'PUT' : 'POST';
-
-  medicationDispense.status = medicationDispenseStatus;
-
-  // TODO for now we don't support a different prepared and handed over date, so just set the handed over to the prepared date
-  medicationDispense.whenPrepared = medicationDispense.whenHandedOver;
-
-  return openmrsFetch(url, {
-    method: method,
+/**
+ * Saves dispenses through the stock management module, which records each dispense, moves its
+ * prescription's fulfiller status and takes its stock in one transaction. If any part of any
+ * dispense fails, nothing is saved and the request is rejected with the reason, so a caller
+ * never has to clean up after a half-saved dispense.
+ */
+export function saveDispenses(dispenses: Array<DispenseRequestItem>, abortController?: AbortController) {
+  return openmrsFetch<{ dispenses: Array<MedicationDispense> }>(dispenseUrl, {
+    method: 'POST',
     signal: abortController?.signal,
     headers: {
       'Content-Type': 'application/json',
     },
-    body: medicationDispense,
+    body: { dispenses },
   });
 }
 
-export function deleteMedicationDispense(medicationDispenseUuid: string) {
-  return openmrsFetch(`${fhirBaseUrl}/MedicationDispense/${medicationDispenseUuid}`, {
+/**
+ * Deletes a dispense, putting back the stock it took and, when a status change is given,
+ * setting the prescription's new fulfiller status, all in one transaction.
+ */
+export function deleteDispense(
+  medicationDispenseUuid: string,
+  statusChange?: { fulfillerStatus: MedicationRequestFulfillerStatus | null },
+) {
+  return openmrsFetch(`${dispenseUrl}/${medicationDispenseUuid}`, {
     method: 'DELETE',
+    ...(statusChange && {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: statusChange,
+    }),
   });
 }
 

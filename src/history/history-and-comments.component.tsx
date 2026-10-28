@@ -14,11 +14,8 @@ import {
   userHasAccess,
   useSession,
 } from '@openmrs/esm-framework';
-import {
-  updateMedicationRequestFulfillerStatus,
-  usePrescriptionDetails,
-} from '../medication-request/medication-request.resource';
-import { deleteMedicationDispense } from '../medication-dispense/medication-dispense.resource';
+import { usePrescriptionDetails } from '../medication-request/medication-request.resource';
+import { deleteDispense } from '../medication-dispense/medication-dispense.resource';
 import { type MedicationDispense, MedicationDispenseStatus, type MedicationRequestBundle } from '../types';
 import {
   PRIVILEGE_DELETE_DISPENSE,
@@ -30,9 +27,9 @@ import {
   computeNewFulfillerStatusAfterDelete,
   computeQuantityRemaining,
   computeTotalQuantityDispensed,
+  getErrorMessage,
   getFulfillerStatus,
   getMedicationRequestBundleContainingMedicationDispense,
-  getUuidFromReference,
   markEncounterAsStale,
   revalidate,
   sortMedicationDispensesByWhenHandedOver,
@@ -240,39 +237,30 @@ const MedicationDispenseActionMenu: React.FC<MedicationDispenseActionMenuProps> 
       config.dispenseBehavior.restrictTotalQuantityDispensed,
     );
     markEncounterAsStale(encounterUuid);
-    deleteMedicationDispense(medicationDispense.id)
+    // the delete, the stock it puts back and any status change are saved together, so a failed
+    // delete leaves the dispense, its stock and the prescription exactly as they were
+    deleteDispense(
+      medicationDispense.id,
+      currentFulfillerStatus !== newFulfillerStatus ? { fulfillerStatus: newFulfillerStatus } : undefined,
+    )
       .then(() => {
         showSnackbar({
           kind: 'success',
           title: t('success', 'Success'),
           subtitle: t('medicationDispenseDeleted', 'Medication dispense was deleted successfully'),
         });
-        if (currentFulfillerStatus !== newFulfillerStatus) {
-          updateMedicationRequestFulfillerStatus(
-            getUuidFromReference(
-              medicationDispense.authorizingPrescription[0].reference, // assumes authorizing prescription exist
-            ),
-            newFulfillerStatus,
-          )
-            .then(() => {
-              revalidate(mutate, encounterUuid);
-            })
-            .catch(() => {
-              showSnackbar({
-                kind: 'error',
-                title: t('updateStatusFailed', 'Update Status Failed'),
-                subtitle: t('couldNotUpdateMedicationRequestStatus', 'Could not update medication request status'),
-              });
-            });
-        }
         revalidate(mutate, encounterUuid);
       })
-      .catch(() => {
+      .catch((error) => {
         showSnackbar({
           kind: 'error',
           title: t('deleteFailed', 'Delete Failed'),
-          subtitle: t('couldNotDeleteMedicationDispense', 'Could not delete medication dispense'),
+          subtitle: getErrorMessage(
+            error,
+            t('couldNotDeleteMedicationDispense', 'Could not delete medication dispense'),
+          ),
         });
+        revalidate(mutate, encounterUuid);
       });
   };
 

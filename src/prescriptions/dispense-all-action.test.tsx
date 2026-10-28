@@ -1,6 +1,9 @@
+import React from 'react';
 import dayjs from 'dayjs';
-import { describe, expect, test } from 'vitest';
-import { type Session } from '@openmrs/esm-framework';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { type Session, showSnackbar, useConfig, useSession } from '@openmrs/esm-framework';
 import {
   type InventoryItem,
   type MedicationDispense,
@@ -12,7 +15,33 @@ import {
 } from '../types';
 import { OPENMRS_FHIR_EXT_REQUEST_FULFILLER_STATUS } from '../constants';
 import { type PharmacyConfig } from '../config-schema';
-import { planDispenseAll } from './dispense-all-action.component';
+import DispenseAllAction, { planDispenseAll } from './dispense-all-action.component';
+import { saveDispenses, useProviders } from '../medication-dispense/medication-dispense.resource';
+import { useDispenseStockForDrugs } from '../forms/stock-dispense/stock.resource';
+import type * as medicationDispenseResource from '../medication-dispense/medication-dispense.resource';
+import type * as stockResource from '../forms/stock-dispense/stock.resource';
+
+vi.mock('../medication-dispense/medication-dispense.resource', async (importOriginal) => ({
+  ...(await importOriginal<typeof medicationDispenseResource>()),
+  saveDispenses: vi.fn(),
+  useProviders: vi.fn(),
+}));
+
+vi.mock('../forms/stock-dispense/stock.resource', async (importOriginal) => ({
+  ...(await importOriginal<typeof stockResource>()),
+  useDispenseStockForDrugs: vi.fn(),
+}));
+
+vi.mock('../pharmacy-queue-notification', () => ({
+  notifyIfPrescriptionFulfillmentComplete: vi.fn(),
+}));
+
+const mockSaveDispenses = vi.mocked(saveDispenses);
+const mockUseProviders = vi.mocked(useProviders);
+const mockUseDispenseStockForDrugs = vi.mocked(useDispenseStockForDrugs);
+const mockUseConfig = vi.mocked(useConfig);
+const mockUseSession = vi.mocked(useSession);
+const mockShowSnackbar = vi.mocked(showSnackbar);
 
 const session = {
   currentProvider: { uuid: 'provider-uuid' },
@@ -20,8 +49,10 @@ const session = {
 } as unknown as Session;
 
 const config = {
-  enableStockDispense: true,
   validateBatch: true,
+  dispenseBehavior: { allowModifyingPrescription: false, restrictTotalQuantityDispensed: true },
+  completeOrderWithThisDispense: false,
+  enableDuplicateDispenseCheck: false,
   medicationRequestExpirationPeriodInDays: 90,
   actionButtons: { pauseButton: { enabled: true }, closeButton: { enabled: true } },
 } as unknown as PharmacyConfig;
@@ -145,16 +176,111 @@ describe('planDispenseAll', () => {
     ).toBe(false);
   });
 
-  test('ignores stock entirely when stock dispensing is disabled', () => {
-    const result = plan(
-      [buildBundle('r1', 'drug-a', 10), buildBundle('r2', 'drug-b', 10)],
-      {},
-      {
-        ...config,
-        enableStockDispense: false,
-      },
+  test('does not count a fraction of a unit left in the earliest batch', () => {
+    const bundles = [buildBundle('r1', 'drug-a', 10.5), buildBundle('r2', 'drug-b', 10)];
+    const stock = { 'drug-a': [batch('a1', 10.9, 100)], 'drug-b': [batch('b1', 10, 100)] };
+
+    expect(plan(bundles, stock).canDispenseAll).toBe(false);
+  });
+});
+
+describe('DispenseAllAction', () => {
+  const bundles = [buildBundle('r1', 'drug-a', 30), buildBundle('r2', 'drug-b', 10)];
+
+  beforeEach(() => {
+    mockUseConfig.mockReturnValue(config);
+    mockUseSession.mockReturnValue(session);
+    mockUseProviders.mockReturnValue([]);
+    mockUseDispenseStockForDrugs.mockReturnValue({
+      inventoryItemsByDrug: { 'drug-a': [batch('a1', 100, 100)], 'drug-b': [batch('b1', 50, 100)] },
+      isLoading: false,
+      error: null,
+    });
+    mockSaveDispenses.mockResolvedValue({ ok: true, data: { dispenses: [] } } as any);
+  });
+
+  const confirmDispenseAll = async () => {
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Dispense all' }));
+    await user.click(screen.getByRole('button', { name: 'Dispense {{count}} medications' }));
+  };
+
+  test('saves every medication, each with its batch, in a single request', async () => {
+    render(
+      <DispenseAllAction
+        encounterUuid="encounter-uuid"
+        patientUuid="patient-uuid"
+        medicationRequestBundles={bundles}
+        disabled={false}
+      />,
     );
 
-    expect(result.canDispenseAll).toBe(true);
+    await confirmDispenseAll();
+
+    expect(mockSaveDispenses).toHaveBeenCalledTimes(1);
+    const [items] = mockSaveDispenses.mock.calls[0];
+    expect(items.map((item) => [item.medicationDispense.status, item.stock])).toEqual([
+      [
+        MedicationDispenseStatus.completed,
+        [
+          {
+            dispenseLocation: 'location-uuid',
+            stockItem: 'stock-item',
+            stockBatch: 'a1',
+            stockItemPackagingUOM: 'uom',
+            quantity: 30,
+          },
+        ],
+      ],
+      [
+        MedicationDispenseStatus.completed,
+        [
+          {
+            dispenseLocation: 'location-uuid',
+            stockItem: 'stock-item',
+            stockBatch: 'b1',
+            stockItemPackagingUOM: 'uom',
+            quantity: 10,
+          },
+        ],
+      ],
+    ]);
+    expect(mockShowSnackbar).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '{{count}} medications dispensed' }),
+    );
+  });
+
+  test('reports that nothing was dispensed when the request fails, and retries under the same ids', async () => {
+    mockSaveDispenses.mockRejectedValueOnce({
+      message: 'Server responded with 400 (Bad Request)',
+      responseBody: { error: { message: 'Not enough stock in batch B1' } },
+    });
+    render(
+      <DispenseAllAction
+        encounterUuid="encounter-uuid"
+        patientUuid="patient-uuid"
+        medicationRequestBundles={bundles}
+        disabled={false}
+      />,
+    );
+
+    await confirmDispenseAll();
+
+    expect(mockShowSnackbar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'error',
+        title: 'Nothing was dispensed',
+        subtitle: 'Not enough stock in batch B1',
+      }),
+    );
+    expect(mockShowSnackbar).not.toHaveBeenCalledWith(
+      expect.objectContaining({ title: '{{count}} medications dispensed' }),
+    );
+
+    await confirmDispenseAll();
+
+    const idsOf = (call: number) => mockSaveDispenses.mock.calls[call][0].map((item) => item.medicationDispense.id);
+    expect(idsOf(1)).toEqual(idsOf(0));
+    expect(new Set(idsOf(0)).size).toBe(2);
   });
 });

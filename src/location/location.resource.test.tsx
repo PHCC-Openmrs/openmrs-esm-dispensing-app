@@ -48,7 +48,6 @@ const pharmacyConfig: PharmacyConfig = {
     substitutionReason: { uuid: '' },
     substitutionType: { uuid: '' },
   },
-  enableStockDispense: false,
   completeOrderWithThisDispense: false,
   validateBatch: false,
   enableDuplicateDispenseCheck: true,

@@ -1,14 +1,13 @@
-import { type FetchResponse } from '@openmrs/esm-framework';
 import {
+  type DispenseRequestItem,
+  type DispenseStockLine,
   type MedicationDispense,
   MedicationDispenseStatus,
   type MedicationRequestBundle,
   MedicationRequestFulfillerStatus,
 } from '../types';
 import { type PharmacyConfig } from '../config-schema';
-import { computeNewFulfillerStatusAfterDispenseEvent, getFulfillerStatus, getUuidFromReference } from '../utils';
-import { updateMedicationRequestFulfillerStatus } from '../medication-request/medication-request.resource';
-import { saveMedicationDispense } from './medication-dispense.resource';
+import { computeNewFulfillerStatusAfterDispenseEvent, getFulfillerStatus } from '../utils';
 
 /**
  * Whether a dispense carries everything needed to be saved: a dispenser, a quantity with a
@@ -45,41 +44,81 @@ export function isMedicationDispenseValid(medicationDispense: MedicationDispense
 }
 
 /**
- * Saves a dispense as completed and moves the prescription's fulfiller status on to match:
- * straight to completed when `completeOrderWithThisDispense` is set, otherwise to whatever the
- * dispensed total now implies. Stock is not touched here; callers send the stock dispense
- * request once this has succeeded.
+ * The dispense as the backend stores it: with its status, the prepared time set to the
+ * handed-over time (the two are not captured separately yet), and an id. A new dispense gets
+ * the id generated for it when its form opened, so resubmitting after a lost response is
+ * recognised as the same dispense rather than saved, and stock taken, a second time.
  */
-export function completeMedicationDispense(
+export function prepareMedicationDispense(
+  medicationDispense: MedicationDispense,
+  status: MedicationDispenseStatus,
+  newDispenseId: string,
+): MedicationDispense {
+  return {
+    ...medicationDispense,
+    id: medicationDispense.id || newDispenseId,
+    status,
+    whenPrepared: medicationDispense.whenHandedOver,
+  };
+}
+
+/**
+ * Builds the request item for a completed dispense: the dispense, the batches it is taken from,
+ * and the prescription's new fulfiller status, which goes straight to completed when
+ * `completeOrderWithThisDispense` is set and is otherwise whatever the dispensed total now
+ * implies, sent only when it changes.
+ */
+export function buildCompletedDispenseItem(
   medicationDispense: MedicationDispense,
   medicationRequestBundle: MedicationRequestBundle,
   config: PharmacyConfig,
-  abortController?: AbortController,
-): Promise<FetchResponse> {
-  return saveMedicationDispense(medicationDispense, MedicationDispenseStatus.completed, abortController).then(
-    (response) => {
-      if (!response.ok) {
-        return response;
-      }
-      // assumes the authorizing prescription exists
-      const medicationRequestUuid = getUuidFromReference(medicationDispense.authorizingPrescription[0].reference);
-      if (config.completeOrderWithThisDispense) {
-        return updateMedicationRequestFulfillerStatus(
-          medicationRequestUuid,
-          MedicationRequestFulfillerStatus.completed,
-        ).then(() => response);
-      }
-      const newFulfillerStatus = computeNewFulfillerStatusAfterDispenseEvent(
-        medicationDispense,
-        medicationRequestBundle,
-        config.dispenseBehavior.restrictTotalQuantityDispensed,
-      );
-      if (getFulfillerStatus(medicationRequestBundle.request) !== newFulfillerStatus) {
-        return updateMedicationRequestFulfillerStatus(medicationRequestUuid, newFulfillerStatus).then(() => response);
-      }
-      return response;
-    },
-  );
+  newDispenseId: string,
+  stock: Array<DispenseStockLine>,
+): DispenseRequestItem {
+  const item: DispenseRequestItem = {
+    medicationDispense: prepareMedicationDispense(
+      medicationDispense,
+      MedicationDispenseStatus.completed,
+      newDispenseId,
+    ),
+    restrictTotalQuantityDispensed: config.dispenseBehavior.restrictTotalQuantityDispensed,
+    stock,
+  };
+  if (medicationDispense.id) {
+    item.update = true;
+  }
+
+  if (config.completeOrderWithThisDispense) {
+    item.fulfillerStatus = MedicationRequestFulfillerStatus.completed;
+  } else {
+    // computed before the new id is added: a dispense without an id is what tells this a new
+    // dispense is joining the bundle rather than replacing one already in it
+    const newFulfillerStatus = computeNewFulfillerStatusAfterDispenseEvent(
+      { ...medicationDispense, status: MedicationDispenseStatus.completed },
+      medicationRequestBundle,
+      config.dispenseBehavior.restrictTotalQuantityDispensed,
+    );
+    if (getFulfillerStatus(medicationRequestBundle.request) !== newFulfillerStatus) {
+      item.fulfillerStatus = newFulfillerStatus;
+    }
+  }
+  return item;
+}
+
+/**
+ * Builds the request item for a paused or closed dispense. Only a new one moves the
+ * prescription's fulfiller status; editing an existing pause or close record leaves it alone.
+ */
+export function buildPausedOrClosedDispenseItem(
+  medicationDispense: MedicationDispense,
+  status: MedicationDispenseStatus.on_hold | MedicationDispenseStatus.declined,
+  fulfillerStatus: MedicationRequestFulfillerStatus,
+  newDispenseId: string,
+): DispenseRequestItem {
+  const prepared = prepareMedicationDispense(medicationDispense, status, newDispenseId);
+  return medicationDispense.id
+    ? { medicationDispense: prepared, update: true }
+    : { medicationDispense: prepared, fulfillerStatus };
 }
 
 /**

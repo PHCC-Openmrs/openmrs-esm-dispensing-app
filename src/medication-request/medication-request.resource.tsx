@@ -2,7 +2,6 @@ import { useMemo } from 'react';
 import dayjs from 'dayjs';
 import useSWR from 'swr';
 import { fhirBaseUrl, openmrsFetch, parseDate } from '@openmrs/esm-framework';
-import { JSON_MERGE_PATH_MIME_TYPE, OPENMRS_FHIR_EXT_REQUEST_FULFILLER_STATUS } from '../constants';
 import {
   type AllergyIntoleranceResponse,
   type EncounterResponse,
@@ -11,7 +10,6 @@ import {
   type PrescriptionsTableRow,
   type MedicationDispense,
   type Encounter,
-  type MedicationRequestFulfillerStatus,
   type MedicationRequestBundle,
   type SimpleLocation,
 } from '../types';
@@ -315,26 +313,4 @@ export function useMedicationRequest(reference: string, refreshInterval) {
     medicationRequest: data ? data.data : null,
     isLoading,
   };
-}
-
-export function updateMedicationRequestFulfillerStatus(
-  medicationRequestUuid: string,
-  fulfillerStatus: MedicationRequestFulfillerStatus,
-) {
-  const url = `${fhirBaseUrl}/MedicationRequest/${medicationRequestUuid}`;
-
-  return openmrsFetch(url, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': JSON_MERGE_PATH_MIME_TYPE,
-    },
-    body: {
-      extension: [
-        {
-          url: OPENMRS_FHIR_EXT_REQUEST_FULFILLER_STATUS,
-          valueCode: fulfillerStatus,
-        },
-      ],
-    },
-  });
 }

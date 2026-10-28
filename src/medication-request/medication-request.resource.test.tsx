@@ -3,15 +3,12 @@ import { vi, describe, expect, test } from 'vitest';
 import dayjs from 'dayjs';
 import useSWR from 'swr';
 import {
-  updateMedicationRequestFulfillerStatus,
   useMedicationRequest,
   usePatientAllergies,
   usePrescriptionDetails,
   usePrescriptionsTable,
 } from './medication-request.resource';
 import { openmrsFetch, parseDate } from '@openmrs/esm-framework';
-import { MedicationRequestFulfillerStatus } from '../types';
-import { JSON_MERGE_PATH_MIME_TYPE, OPENMRS_FHIR_EXT_REQUEST_FULFILLER_STATUS } from '../constants';
 
 vi.mocked(openmrsFetch);
 vi.mock('swr');
@@ -1431,26 +1428,6 @@ describe('Medication Request Resource Test', () => {
     useMedicationRequest('MedicationRequest/123abc', 10000);
     expect(useSWR).toHaveBeenCalledWith('/ws/fhir2/R4/MedicationRequest/123abc', openmrsFetch, {
       refreshInterval: 10000,
-    });
-  });
-
-  test('updateMedicationRequestFulfillerStatus should call medication request FHIR endpoint with appropriate data ', () => {
-    const medicationRequestUuid = '123abc';
-
-    updateMedicationRequestFulfillerStatus(medicationRequestUuid, MedicationRequestFulfillerStatus.completed);
-    expect(openmrsFetch).toHaveBeenCalledWith(`/ws/fhir2/R4/MedicationRequest/${medicationRequestUuid}`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': JSON_MERGE_PATH_MIME_TYPE,
-      },
-      body: {
-        extension: [
-          {
-            url: OPENMRS_FHIR_EXT_REQUEST_FULFILLER_STATUS,
-            valueCode: MedicationRequestFulfillerStatus.completed,
-          },
-        ],
-      },
     });
   });
 });

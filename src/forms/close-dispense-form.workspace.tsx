@@ -12,11 +12,11 @@ import {
   Workspace2,
   type Workspace2DefinitionProps,
 } from '@openmrs/esm-framework';
-import { saveMedicationDispense, useReasonForCloseValueSet } from '../medication-dispense/medication-dispense.resource';
-import { updateMedicationRequestFulfillerStatus } from '../medication-request/medication-request.resource';
+import { saveDispenses, useReasonForCloseValueSet } from '../medication-dispense/medication-dispense.resource';
+import { buildPausedOrClosedDispenseItem } from '../medication-dispense/complete-medication-dispense';
 import { type MedicationDispense, MedicationDispenseStatus, MedicationRequestFulfillerStatus } from '../types';
 import { type PharmacyConfig } from '../config-schema';
-import { getUuidFromReference, markEncounterAsStale, revalidate } from '../utils';
+import { generateUuid, getErrorMessage, markEncounterAsStale, revalidate } from '../utils';
 import { notifyIfPrescriptionFulfillmentComplete } from '../pharmacy-queue-notification';
 import styles from './forms.scss';
 
@@ -45,6 +45,9 @@ const CloseDispenseForm: React.FC<Workspace2DefinitionProps<CloseDispenseFormPro
 
   // to prevent duplicate submits
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // a new close is saved under this id for as long as the form is open, so a resubmit after a
+  // lost response is recognised instead of saved twice
+  const [newDispenseId] = useState(generateUuid);
   const [reasonsForClose, setReasonsForClose] = useState([]);
   const { reasonForCloseValueSet } = useReasonForCloseValueSet(config.valueSets.reasonForClose.uuid);
 
@@ -71,37 +74,33 @@ const CloseDispenseForm: React.FC<Workspace2DefinitionProps<CloseDispenseFormPro
       setIsSubmitting(true);
       const abortController = new AbortController();
       markEncounterAsStale(encounterUuid);
-      saveMedicationDispense(medicationDispensePayload, MedicationDispenseStatus.declined, abortController)
-        .then((response) => {
-          // only update request status when added a new dispense event, not updating
-          if (response.ok && !medicationDispense.id) {
-            return updateMedicationRequestFulfillerStatus(
-              getUuidFromReference(
-                medicationDispensePayload.authorizingPrescription[0].reference, // assumes authorizing prescription exist
-              ),
-              MedicationRequestFulfillerStatus.declined,
-            );
-          } else {
-            return response;
-          }
-        })
-        .then((response) => {
-          if (response.ok) {
-            revalidate(mutate, encounterUuid);
-            notifyIfPrescriptionFulfillmentComplete(
-              encounterUuid,
-              patientUuid,
-              config.medicationRequestExpirationPeriodInDays,
-            );
-            showSnackbar({
-              kind: 'success',
-              title: t(
-                mode === 'enter' ? 'medicationDispenseClosed' : 'medicationDispenseUpdated',
-                mode === 'enter' ? 'Medication dispense closed.' : 'Dispense record successfully updated.',
-              ),
-            });
-            closeWorkspace({ discardUnsavedChanges: true });
-          }
+      // the close and, for a new one, the prescription's declined status are saved together
+      saveDispenses(
+        [
+          buildPausedOrClosedDispenseItem(
+            medicationDispensePayload,
+            MedicationDispenseStatus.declined,
+            MedicationRequestFulfillerStatus.declined,
+            newDispenseId,
+          ),
+        ],
+        abortController,
+      )
+        .then(() => {
+          revalidate(mutate, encounterUuid);
+          notifyIfPrescriptionFulfillmentComplete(
+            encounterUuid,
+            patientUuid,
+            config.medicationRequestExpirationPeriodInDays,
+          );
+          showSnackbar({
+            kind: 'success',
+            title: t(
+              mode === 'enter' ? 'medicationDispenseClosed' : 'medicationDispenseUpdated',
+              mode === 'enter' ? 'Medication dispense closed.' : 'Dispense record successfully updated.',
+            ),
+          });
+          closeWorkspace({ discardUnsavedChanges: true });
         })
         .catch((error) => {
           showSnackbar({
@@ -110,7 +109,7 @@ const CloseDispenseForm: React.FC<Workspace2DefinitionProps<CloseDispenseFormPro
               mode === 'enter' ? 'Error closing medication dispense.' : 'Error updating dispense record',
             ),
             kind: 'error',
-            subtitle: error?.message,
+            subtitle: getErrorMessage(error),
           });
           setIsSubmitting(false);
         });
