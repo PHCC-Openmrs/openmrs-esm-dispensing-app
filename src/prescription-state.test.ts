@@ -11,6 +11,7 @@ import {
 import { OPENMRS_FHIR_EXT_REQUEST_FULFILLER_STATUS } from './constants';
 import {
   computePrescriptionState,
+  getAdminActions,
   getAvailableActions,
   isExpired,
   PrescriptionAction,
@@ -267,6 +268,24 @@ describe('getAvailableActions', () => {
   it.each(TERMINAL_STATES)('offers no actions in the terminal state "%s"', (state) => {
     expect(getAvailableActions(state, allButtonsEnabled)).toEqual([]);
   });
+});
+
+describe('getAdminActions', () => {
+  it('lets an administrator dispense against a closed or cancelled request', () => {
+    expect(getAdminActions(PrescriptionState.closed)).toEqual([PrescriptionAction.dispense]);
+    expect(getAdminActions(PrescriptionState.cancelled)).toEqual([PrescriptionAction.dispense]);
+  });
+
+  it('lets an administrator cancel a completed request', () => {
+    expect(getAdminActions(PrescriptionState.completed)).toEqual([PrescriptionAction.cancelDispensed]);
+  });
+
+  it.each([PrescriptionState.active, PrescriptionState.paused, PrescriptionState.expired])(
+    'adds nothing to the ordinary actions in the state "%s"',
+    (state) => {
+      expect(getAdminActions(state)).toEqual([]);
+    },
+  );
 });
 
 describe('summarizePrescriptionStates', () => {

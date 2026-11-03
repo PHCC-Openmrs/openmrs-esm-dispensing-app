@@ -32,6 +32,7 @@ export enum PrescriptionAction {
   dispense = 'dispense',
   pause = 'pause',
   close = 'close',
+  cancelDispensed = 'cancelDispensed',
 }
 
 /**
@@ -263,6 +264,24 @@ export function getAvailableActions(
     }
     return true;
   });
+}
+
+/**
+ * The extra actions an administrator (PRIVILEGE_UNDO) gets to undo a terminal state: dispensing
+ * against a closed or cancelled request, and cancelling a completed one, which voids its dispenses
+ * and returns their stock. They are kept out of ACTIONS_BY_STATE so the worklist's notion of what
+ * still needs attention is the same for every user.
+ */
+export function getAdminActions(state: PrescriptionState): ReadonlyArray<PrescriptionAction> {
+  switch (state) {
+    case PrescriptionState.closed:
+    case PrescriptionState.cancelled:
+      return [PrescriptionAction.dispense];
+    case PrescriptionState.completed:
+      return [PrescriptionAction.cancelDispensed];
+    default:
+      return [];
+  }
 }
 
 /**

@@ -14,6 +14,8 @@ export const PRIVILEGE_CREATE_DISPENSE_MODIFY_DETAILS = 'Task: dispensing.create
 export const PRIVILEGE_EDIT_DISPENSE = 'Task: dispensing.edit.dispense';
 export const PRIVILEGE_DELETE_DISPENSE = 'Task: dispensing.delete.dispense';
 export const PRIVILEGE_DELETE_DISPENSE_THIS_PROVIDER_ONLY = 'Task: dispensing.delete.dispense.ifCreator';
+// defined by the stock management module: lets an administrator undo a closed, cancelled or completed prescription
+export const PRIVILEGE_UNDO = 'Task: stockmanagement.undo';
 
 export const PRESCRIPTIONS_TABLE_ENDPOINT = 'Encounter?_query=encountersWithMedicationRequests';
 

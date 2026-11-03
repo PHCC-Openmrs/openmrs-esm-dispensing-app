@@ -74,6 +74,11 @@
       "name": "close-action-button",
       "slot": "prescription-action-button-slot",
       "component": "closeActionButton"
+    },
+    {
+      "name": "cancel-dispensed-action-button",
+      "slot": "prescription-action-button-slot",
+      "component": "cancelDispensedActionButton"
     }
   ],
   "workspaces2": [
@@ -142,6 +147,10 @@
     {
       "name": "delete-confirm-modal",
       "component": "deleteConfirmModal"
+    },
+    {
+      "name": "cancel-dispensed-prescription-modal",
+      "component": "cancelDispensedPrescriptionModal"
     },
     {
       "name": "duplicate-dispense-modal",

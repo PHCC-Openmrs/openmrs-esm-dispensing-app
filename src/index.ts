@@ -1,5 +1,6 @@
 import { defineConfigSchema, getAsyncLifecycle, getSyncLifecycle } from '@openmrs/esm-framework';
 import { configSchema } from './config-schema';
+import CancelDispensedActionButton from './components/prescription-actions/cancel-dispensed-action-button.component';
 import CloseActionButton from './components/prescription-actions/close-action-button.component';
 import DispenseActionButton from './components/prescription-actions/dispense-action-button.component';
 import DispensingComponent from './dispensing.component';
@@ -30,6 +31,7 @@ export const dispensingDashboard = getSyncLifecycle(DispensingDashboardComponent
 export const dispensingDashboardLink = getSyncLifecycle(DispensingLinkHomepageComponent, options);
 
 // Prescription action buttons
+export const cancelDispensedActionButton = getSyncLifecycle(CancelDispensedActionButton, options);
 export const closeActionButton = getSyncLifecycle(CloseActionButton, options);
 export const dispenseActionButton = getSyncLifecycle(DispenseActionButton, options);
 export const pauseActionButton = getSyncLifecycle(PauseActionButton, options);
@@ -47,6 +49,10 @@ export const printPrescriptionPreviewModal = getAsyncLifecycle(
   options,
 );
 export const deleteConfirmModal = getAsyncLifecycle(() => import('./history/delete-confirm.modal'), options);
+export const cancelDispensedPrescriptionModal = getAsyncLifecycle(
+  () => import('./components/prescription-actions/cancel-dispensed-prescription.modal'),
+  options,
+);
 export const duplicateDispenseModal = getAsyncLifecycle(() => import('./forms/duplicate-dispense.modal'), options);
 
 export const patientDiagnoses = getAsyncLifecycle(() => import('./diagnoses/diagnoses.component'), options);

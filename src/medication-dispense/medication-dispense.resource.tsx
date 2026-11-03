@@ -50,6 +50,20 @@ export function deleteDispense(
   });
 }
 
+/**
+ * Cancels a dispensed prescription (administrators only): every completed dispense on the order is
+ * voided with its stock returned, and the prescription is closed, all in one transaction.
+ */
+export function cancelDispensedOrder(orderUuid: string, reason: string) {
+  return openmrsFetch<{ voided: Array<string> }>(`${dispenseUrl}/order/${orderUuid}/cancel`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: { reason },
+  });
+}
+
 export function useOrderConfig() {
   const { data, error, isValidating } = useSWR<{ data: OrderConfig }, Error>(
     `${restBaseUrl}/orderentryconfig`,

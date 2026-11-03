@@ -1,8 +1,14 @@
 import React from 'react';
-import { ExtensionSlot, useConfig, useSession } from '@openmrs/esm-framework';
+import { ExtensionSlot, useConfig, userHasAccess, useSession } from '@openmrs/esm-framework';
 import { type MedicationRequestBundle } from '../types';
 import { computeQuantityRemaining, computeTotalQuantityDispensed } from '../utils';
-import { computePrescriptionState, getAvailableActions, PrescriptionAction } from '../prescription-state';
+import {
+  computePrescriptionState,
+  getAdminActions,
+  getAvailableActions,
+  PrescriptionAction,
+} from '../prescription-state';
+import { PRIVILEGE_UNDO } from '../constants';
 import { type PharmacyConfig } from '../config-schema';
 import { useProviders } from '../medication-dispense/medication-dispense.resource';
 import styles from './action-buttons.scss';
@@ -28,14 +34,18 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
   const state = computePrescriptionState(medicationRequestBundle, {
     medicationRequestExpirationPeriodInDays: config.medicationRequestExpirationPeriodInDays,
   });
-  const availableActions = getAvailableActions(state, {
-    pauseButtonEnabled: config.actionButtons.pauseButton.enabled,
-    closeButtonEnabled: config.actionButtons.closeButton.enabled,
-  });
+  const availableActions = [
+    ...getAvailableActions(state, {
+      pauseButtonEnabled: config.actionButtons.pauseButton.enabled,
+      closeButtonEnabled: config.actionButtons.closeButton.enabled,
+    }),
+    ...(session?.user && userHasAccess(PRIVILEGE_UNDO, session.user) ? getAdminActions(state) : []),
+  ];
 
   const dispensable = availableActions.includes(PrescriptionAction.dispense);
   const pauseable = availableActions.includes(PrescriptionAction.pause);
   const closeable = availableActions.includes(PrescriptionAction.close);
+  const cancellable = availableActions.includes(PrescriptionAction.cancelDispensed);
 
   let quantityRemaining = null;
   if (config.dispenseBehavior.restrictTotalQuantityDispensed) {
@@ -53,6 +63,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
     dispensable,
     pauseable,
     closeable,
+    cancellable,
     quantityRemaining,
     quantityDispensed,
     patientUuid,
