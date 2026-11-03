@@ -52,7 +52,16 @@ const mockWorkspaceProps = {
 // Mock the child components
 vi.mock('./medication-dispense-review.component', () => ({
   __esModule: true,
-  default: () => <div>Medication Dispense Review</div>,
+  default: ({ canAddExtra, updateExtraQuantity }) => (
+    <div>
+      Medication Dispense Review
+      {canAddExtra && (
+        <button type="button" onClick={() => updateExtraQuantity(5)}>
+          Add 5 extra
+        </button>
+      )}
+    </div>
+  ),
 }));
 
 // stands in for the batch selector: picking a batch is what lets a dispense be submitted
@@ -300,6 +309,7 @@ describe('DispenseForm - duplicate dispense check', () => {
 const renderDispenseForm = (
   medicationDispense: MedicationDispense = createMockMedicationDispense(),
   mode: 'enter' | 'edit' = 'enter',
+  quantityRemaining = 30,
 ) =>
   render(
     <DispenseForm
@@ -310,7 +320,7 @@ const renderDispenseForm = (
         mode,
         patientUuid: 'patient-uuid',
         encounterUuid: 'encounter-uuid',
-        quantityRemaining: 30,
+        quantityRemaining,
         quantityDispensed: 0,
       }}
       closeWorkspace={mockCloseWorkspace}
@@ -395,5 +405,34 @@ describe('DispenseForm - saving with stock', () => {
     expect(item.update).toBe(true);
     expect(item.medicationDispense.id).toBe('existing-dispense-uuid');
     expect(item.stock).toEqual([expect.objectContaining({ stockBatch: 'stock-batch-uuid', quantity: 30 })]);
+  });
+
+  test('dispenses the extra on top of everything left, taking the total from stock', async () => {
+    const user = userEvent.setup();
+    renderDispenseForm();
+
+    await user.click(screen.getByRole('button', { name: /add 5 extra/i }));
+    await user.click(screen.getByRole('button', { name: /select batch/i }));
+    await user.click(screen.getByRole('button', { name: /dispense prescription/i }));
+
+    const [[item]] = mockSaveDispenses.mock.calls[0];
+    expect(item.medicationDispense.quantity.value).toBe(35);
+    expect(item.extraQuantity).toBe(5);
+    expect(item.stock).toEqual([expect.objectContaining({ quantity: 35 })]);
+  });
+
+  test('offers no extra while less than what is left is dispensed', () => {
+    renderDispenseForm(createMockMedicationDispense(), 'enter', 40);
+
+    expect(screen.queryByRole('button', { name: /add 5 extra/i })).not.toBeInTheDocument();
+  });
+
+  test('blocks a quantity above what is left to dispense', async () => {
+    const user = userEvent.setup();
+    renderDispenseForm(createMockMedicationDispense(), 'enter', 20);
+
+    await user.click(screen.getByRole('button', { name: /select batch/i }));
+
+    expect(screen.getByRole('button', { name: /dispense prescription/i })).toBeDisabled();
   });
 });

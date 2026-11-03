@@ -14,6 +14,9 @@ import {
 } from '../utils';
 import styles from './medication-event.scss';
 
+// Quantities are decimals; drop the float noise a subtraction leaves (25 - 20.0000001).
+const formatQuantity = (quantity: number) => Number(quantity.toFixed(4));
+
 /**
  * Renders a prescription request of a prescript event (ex: ordered, dispensed)
  */
@@ -26,6 +29,8 @@ const MedicationEvent: React.FC<{
   totalQuantityOrdered?: number;
   fillsRemaining?: number;
   totalFills?: number;
+  /** how much of a dispense's quantity was given beyond the prescription */
+  extraQuantity?: number;
 }> = ({
   medicationEvent,
   status = null,
@@ -35,6 +40,7 @@ const MedicationEvent: React.FC<{
   totalQuantityOrdered,
   fillsRemaining,
   totalFills,
+  extraQuantity,
 }) => {
   const { t } = useTranslation();
   const dosageInstruction = getDosageInstruction(medicationEvent.dosageInstruction);
@@ -42,6 +48,10 @@ const MedicationEvent: React.FC<{
   const quantity: Quantity = getQuantity(medicationEvent);
   const refillsAllowed: number = getRefillsAllowed(medicationEvent);
   const isTablet = !isDesktop(useLayoutType());
+  const extraDispensed =
+    totalQuantityOrdered != null && quantityDispensed > totalQuantityOrdered
+      ? quantityDispensed - totalQuantityOrdered
+      : 0;
 
   return (
     <Tile
@@ -86,6 +96,8 @@ const MedicationEvent: React.FC<{
             <span className={styles.label01}>{t('quantity', 'Quantity').toUpperCase()}</span>{' '}
             <span className={styles.quantity}>
               {quantity.value} {quantity.unit}
+              {extraQuantity > 0 &&
+                ` ${t('includesExtra', '(includes {{extra}} extra)', { extra: formatQuantity(extraQuantity) })}`}
             </span>
           </p>
         )}
@@ -99,6 +111,8 @@ const MedicationEvent: React.FC<{
                 total: totalQuantityOrdered,
                 unit: quantity?.unit ?? '',
               })}
+              {extraDispensed > 0 &&
+                ` ${t('includesExtra', '(includes {{extra}} extra)', { extra: formatQuantity(extraDispensed) })}`}
             </span>
           </p>
         )}

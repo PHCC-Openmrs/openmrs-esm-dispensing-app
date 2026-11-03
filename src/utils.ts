@@ -143,6 +143,63 @@ export function computeQuantityRemaining(medicationRequestBundle: MedicationRequ
   return 0;
 }
 
+/** Dispensed and ordered quantities are decimals, so compare them with a little slack, as the server does. */
+const QUANTITY_TOLERANCE = 0.0001;
+
+/**
+ * Whether a dispense of `quantity` uses up everything left on the prescription, which is the only
+ * time extra can be given on top of it. Always false when the remaining quantity isn't tracked
+ * (restrictTotalQuantityDispensed off), since there is then nothing to be extra to.
+ */
+export function canAddExtraQuantity(quantity: number, quantityRemaining: number): boolean {
+  return (
+    quantityRemaining != null &&
+    quantityRemaining > QUANTITY_TOLERANCE &&
+    Math.abs((quantity ?? 0) - quantityRemaining) <= QUANTITY_TOLERANCE
+  );
+}
+
+/** Whether `quantity` is more than is left to dispense; never when the remaining quantity isn't tracked. */
+export function exceedsQuantityRemaining(quantity: number, quantityRemaining: number): boolean {
+  return quantityRemaining != null && (quantity ?? 0) > Math.max(0, quantityRemaining) + QUANTITY_TOLERANCE;
+}
+
+/**
+ * How much of a completed dispense was given beyond the prescription. Not stored anywhere: the
+ * completed dispenses are added up in the order they were handed over, and whatever a dispense
+ * takes past the ordered total is its extra. Extra is only ever added to the dispense that uses
+ * up what is left, so this is that dispense's extra, and 0 for every other one.
+ */
+export function computeExtraQuantity(
+  medicationRequestBundle: MedicationRequestBundle,
+  medicationDispense: MedicationDispense,
+): number {
+  const totalOrdered = medicationRequestBundle?.request
+    ? computeTotalQuantityOrdered(medicationRequestBundle.request)
+    : null;
+  if (
+    !totalOrdered ||
+    medicationDispense?.status !== MedicationDispenseStatus.completed ||
+    !getQuantityUnitsMatch([medicationRequestBundle.request, ...medicationRequestBundle.dispenses])
+  ) {
+    return 0;
+  }
+  const inHandOverOrder = medicationRequestBundle.dispenses
+    .filter((dispense) => dispense.status === MedicationDispenseStatus.completed)
+    .sort(sortMedicationDispensesByWhenHandedOver)
+    .reverse();
+  let dispensedBefore = 0;
+  for (const dispense of inHandOverOrder) {
+    const dispensedAfter = dispensedBefore + (dispense.quantity?.value ?? 0);
+    if (dispense.id === medicationDispense.id) {
+      const extra = dispensedAfter - Math.max(totalOrdered, dispensedBefore);
+      return extra > QUANTITY_TOLERANCE ? extra : 0;
+    }
+    dispensedBefore = dispensedAfter;
+  }
+  return 0;
+}
+
 /**
  * Given a set of medication dispenses, calculate the total quantity dispensed
  * @param medicationDispenses

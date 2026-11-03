@@ -24,6 +24,7 @@ import {
   PRIVILEGE_EDIT_DISPENSE,
 } from '../constants';
 import {
+  computeExtraQuantity,
   computeNewFulfillerStatusAfterDelete,
   computeQuantityRemaining,
   computeTotalQuantityDispensed,
@@ -97,6 +98,10 @@ const HistoryAndComments: React.FC<{
               <MedicationEvent
                 medicationEvent={dispense}
                 status={<DispenseTag medicationDispense={dispense} />}
+                extraQuantity={computeExtraQuantity(
+                  getMedicationRequestBundleContainingMedicationDispense(medicationRequestBundles, dispense),
+                  dispense,
+                )}
                 isDispenseEvent>
                 <div className={styles.dispenseEventActions}>
                   <ExtensionSlot

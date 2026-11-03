@@ -129,6 +129,27 @@ describe('buildCompletedDispenseItem', () => {
     // the edited 30 replaces the original 10 rather than adding to it
     expect(item.fulfillerStatus).toBe(MedicationRequestFulfillerStatus.completed);
   });
+
+  test('sends the extra given beyond the prescription, and completes the prescription', () => {
+    const item = buildCompletedDispenseItem(
+      buildDispense({ quantity: { value: 35, code: 'tablet-code' } }),
+      buildBundle(),
+      buildConfig(),
+      'new-dispense-uuid',
+      stock,
+      5,
+    );
+
+    expect(item.medicationDispense.quantity.value).toBe(35);
+    expect(item.extraQuantity).toBe(5);
+    expect(item.fulfillerStatus).toBe(MedicationRequestFulfillerStatus.completed);
+  });
+
+  test('leaves the extra out when none is given', () => {
+    const item = buildCompletedDispenseItem(buildDispense(), buildBundle(), buildConfig(), 'new-dispense-uuid', stock);
+
+    expect('extraQuantity' in item).toBe(false);
+  });
 });
 
 describe('buildPausedOrClosedDispenseItem', () => {

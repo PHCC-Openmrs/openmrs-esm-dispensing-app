@@ -539,6 +539,11 @@ export type DispenseRequestItem = {
   /** leaving it out keeps the prescription's fulfiller status as it is; null clears it */
   fulfillerStatus?: MedicationRequestFulfillerStatus | null;
   restrictTotalQuantityDispensed?: boolean;
+  /**
+   * how much of the dispense's quantity is given beyond the prescription; only allowed on the
+   * dispense that uses up everything left, and the server refuses it otherwise
+   */
+  extraQuantity?: number;
   /** the batches a completed dispense is taken from; paused and closed dispenses take none */
   stock?: Array<DispenseStockLine>;
 };
