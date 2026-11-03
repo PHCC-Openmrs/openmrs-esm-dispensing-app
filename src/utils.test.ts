@@ -13,6 +13,8 @@ import {
 } from './types';
 import {
   calculateIsFreeTextDosage,
+  canAddExtraQuantity,
+  computeExtraQuantity,
   computeNewFulfillerStatusAfterDelete,
   computeNewFulfillerStatusAfterDispenseEvent,
   computeFillsRemaining,
@@ -37,6 +39,7 @@ import {
   getQuantity,
   getQuantityUnitsMatch,
   getRefillsAllowed,
+  exceedsQuantityRemaining,
   isMostRecentMedicationDispense,
   getPatientNameMatchRank,
 } from './utils';
@@ -915,6 +918,54 @@ describe('Util Tests', () => {
       const request = buildRequest(2, 30);
       request.dispenseRequest.quantity = undefined;
       expect(computeFillsRemaining({ request, dispenses: [] })).toBeNull();
+    });
+  });
+
+  describe('test extra quantity', () => {
+    const request = {
+      dispenseRequest: { quantity: { value: 20, unit: 'Tablet', code: 'tab' }, validityPeriod: { start: '' } },
+    } as unknown as MedicationRequest;
+
+    const buildDispense = (id: string, value: number, whenHandedOver: string): MedicationDispense =>
+      ({
+        resourceType: 'MedicationDispense',
+        id,
+        status: MedicationDispenseStatus.completed,
+        whenHandedOver,
+        quantity: { value, unit: 'Tablet', code: 'tab' },
+      }) as unknown as MedicationDispense;
+
+    test('should allow extra only when everything left is being dispensed', () => {
+      expect(canAddExtraQuantity(20, 20)).toBe(true);
+      expect(canAddExtraQuantity(10, 10)).toBe(true);
+      expect(canAddExtraQuantity(15, 20)).toBe(false);
+      expect(canAddExtraQuantity(0, 0)).toBe(false);
+      expect(canAddExtraQuantity(20, null)).toBe(false);
+    });
+
+    test('should flag a quantity above what is left', () => {
+      expect(exceedsQuantityRemaining(25, 20)).toBe(true);
+      expect(exceedsQuantityRemaining(20, 20)).toBe(false);
+      expect(exceedsQuantityRemaining(1, -5)).toBe(true);
+      expect(exceedsQuantityRemaining(25, null)).toBe(false);
+    });
+
+    test('should attribute the extra to the dispense that used up what was left', () => {
+      const first = buildDispense('a', 10, '2026-11-01T10:00:00Z');
+      const last = buildDispense('b', 15, '2026-11-02T10:00:00Z');
+      const bundle: MedicationRequestBundle = { request, dispenses: [last, first] };
+      expect(computeExtraQuantity(bundle, first)).toBe(0);
+      expect(computeExtraQuantity(bundle, last)).toBe(5);
+    });
+
+    test('should find no extra when no more than ordered was dispensed', () => {
+      const only = buildDispense('a', 20, '2026-11-01T10:00:00Z');
+      expect(computeExtraQuantity({ request, dispenses: [only] }, only)).toBe(0);
+    });
+
+    test('should ignore dispenses that are not completed', () => {
+      const declined = { ...buildDispense('a', 25, '2026-11-01T10:00:00Z'), status: MedicationDispenseStatus.declined };
+      expect(computeExtraQuantity({ request, dispenses: [declined] }, declined)).toBe(0);
     });
   });
 

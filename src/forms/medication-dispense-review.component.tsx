@@ -3,7 +3,12 @@ import dayjs from 'dayjs';
 import { useTranslation } from 'react-i18next';
 import { ComboBox, Dropdown, NumberInput, Stack, TextArea, TextInput, Toggle } from '@carbon/react';
 import { OpenmrsDatePicker, useConfig, useSession, userHasAccess, ResponsiveWrapper } from '@openmrs/esm-framework';
-import { getConceptCodingUuid, getMedicationReferenceOrCodeableConcept, getOpenMRSMedicineDrugName } from '../utils';
+import {
+  exceedsQuantityRemaining,
+  getConceptCodingUuid,
+  getMedicationReferenceOrCodeableConcept,
+  getOpenMRSMedicineDrugName,
+} from '../utils';
 import { useMedicationCodeableConcept, useMedicationFormulations } from '../medication/medication.resource';
 import { useMedicationRequest, usePrescriptionDetails } from '../medication-request/medication-request.resource';
 import {
@@ -26,6 +31,10 @@ interface MedicationDispenseReviewProps {
   setIsFreeTextDosage: (isFreeTextDosage: boolean) => void;
   quantityRemaining: number;
   quantityDispensed: number;
+  /** whether the quantity uses up everything left, so extra may be given on top of it */
+  canAddExtra?: boolean;
+  extraQuantity?: number;
+  updateExtraQuantity?(extraQuantity: number): void;
 }
 
 const MedicationDispenseReview: React.FC<MedicationDispenseReviewProps> = ({
@@ -35,6 +44,9 @@ const MedicationDispenseReview: React.FC<MedicationDispenseReviewProps> = ({
   setIsFreeTextDosage,
   quantityRemaining,
   quantityDispensed,
+  canAddExtra = false,
+  extraQuantity = 0,
+  updateExtraQuantity,
 }) => {
   const { t } = useTranslation();
   const config = useConfig<PharmacyConfig>();
@@ -49,6 +61,8 @@ const MedicationDispenseReview: React.FC<MedicationDispenseReviewProps> = ({
   const [userCanModify, setUserCanModify] = useState(false);
 
   const allowEditing = config.dispenseBehavior.allowModifyingPrescription;
+
+  const quantityExceedsRemaining = exceedsQuantityRemaining(medicationDispense.quantity?.value, quantityRemaining);
 
   const { orderConfigObject } = useOrderConfig();
   const { substitutionTypeValueSet } = useSubstitutionTypeValueSet(config.valueSets.substitutionType.uuid);
@@ -350,7 +364,7 @@ const MedicationDispenseReview: React.FC<MedicationDispenseReviewProps> = ({
                 {t('quantityDispensed', 'Quantity Dispensed')}: {quantityDispensed}
               </p>
               <p className={styles.quantitySummary}>
-                {t('quantityRemaining', 'Quantity Remaining to Dispense')}: {quantityRemaining}
+                {t('quantityRemaining', 'Quantity Remaining to Dispense')}: {Math.max(0, quantityRemaining ?? 0)}
               </p>
             </div>
           </ResponsiveWrapper>
@@ -363,7 +377,14 @@ const MedicationDispenseReview: React.FC<MedicationDispenseReviewProps> = ({
             disabled={!userCanModify}
             hideSteppers={true}
             id="quantity"
-            invalidText={t('numberIsNotValid', 'Number is not valid')}
+            invalid={quantityExceedsRemaining}
+            invalidText={
+              quantityExceedsRemaining
+                ? t('quantityMoreThanRemaining', 'Only {{remaining}} left to dispense. Enter more as extra.', {
+                    remaining: Math.max(0, quantityRemaining),
+                  })
+                : t('numberIsNotValid', 'Number is not valid')
+            }
             label={
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>{t('quantity', 'Quantity')}</div>
             }
@@ -401,6 +422,32 @@ const MedicationDispenseReview: React.FC<MedicationDispenseReviewProps> = ({
             />
           </ResponsiveWrapper>
         </div>
+
+        {canAddExtra && (
+          <div className={styles.dispenseDetailsContainer}>
+            <NumberInput
+              allowEmpty={true}
+              value={extraQuantity || ''}
+              disabled={!userCanModify}
+              hideSteppers={true}
+              id="extraQuantity"
+              invalidText={t('numberIsNotValid', 'Number is not valid')}
+              label={t('extraQuantity', 'Extra')}
+              helperText={
+                extraQuantity > 0
+                  ? t('totalToDispense', 'Total to dispense: {{total}} {{unit}}', {
+                      total: medicationDispense.quantity.value + extraQuantity,
+                      unit: medicationDispense.quantity.unit ?? '',
+                    })
+                  : t('extraQuantityHelper', 'Given in addition to the prescription')
+              }
+              min={0}
+              onChange={(event, state) => {
+                updateExtraQuantity?.(state.value ? parseFloat(state.value.toString()) : 0);
+              }}
+            />
+          </div>
+        )}
 
         <div className={styles.dispenseDetailsContainer}>
           <ResponsiveWrapper>

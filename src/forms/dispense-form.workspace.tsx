@@ -20,6 +20,8 @@ import {
 } from '../types';
 import {
   calculateIsFreeTextDosage,
+  canAddExtraQuantity,
+  computeExtraQuantity,
   generateUuid,
   getDosageInstruction,
   getErrorMessage,
@@ -73,8 +75,28 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
   // Batches selected to dispense from, in first-expiry-first-out order
   const [inventoryItems, setInventoryItems] = useState<Array<InventoryItem>>([]);
 
-  // Keep track of medication dispense payload
-  const [medicationDispensePayload, setMedicationDispensePayload] = useState(medicationDispense);
+  // Given beyond the prescription; when editing, split back out of the saved quantity
+  const [initialExtraQuantity] = useState(() =>
+    mode === 'edit' ? computeExtraQuantity(medicationRequestBundle, medicationDispense) : 0,
+  );
+  const [extraQuantity, setExtraQuantity] = useState(initialExtraQuantity);
+
+  // Keep track of medication dispense payload. Its quantity is the prescribed part only; any
+  // extra is added to it when the dispense is saved.
+  const [medicationDispensePayload, setMedicationDispensePayload] = useState(() =>
+    initialExtraQuantity > 0
+      ? {
+          ...medicationDispense,
+          quantity: { ...medicationDispense.quantity, value: medicationDispense.quantity.value - initialExtraQuantity },
+        }
+      : medicationDispense,
+  );
+
+  // Extra can only be given once everything left on the prescription is being dispensed; the
+  // field is hidden, and its value ignored, otherwise.
+  const canAddExtra = canAddExtraQuantity(medicationDispensePayload?.quantity?.value, quantityRemaining);
+  const effectiveExtraQuantity = canAddExtra ? extraQuantity || 0 : 0;
+  const totalQuantity = (medicationDispensePayload?.quantity?.value ?? 0) + effectiveExtraQuantity;
 
   // to prevent duplicate submits
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -128,11 +150,15 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
         saveDispenses(
           [
             buildCompletedDispenseItem(
-              medicationDispensePayload,
+              {
+                ...medicationDispensePayload,
+                quantity: { ...medicationDispensePayload.quantity, value: totalQuantity },
+              },
               medicationRequestBundle,
               config,
               newDispenseId,
               createDispenseStockLines(batchAllocation.allocations),
+              effectiveExtraQuantity,
             ),
           ],
           abortController,
@@ -199,23 +225,28 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
 
   // whether or not the form is valid and ready to submit
   const isValid = useMemo(
-    () => isMedicationDispenseValid(medicationDispensePayload, isFreeTextDosage),
-    [isFreeTextDosage, medicationDispensePayload],
+    () => isMedicationDispenseValid(medicationDispensePayload, isFreeTextDosage, quantityRemaining),
+    [isFreeTextDosage, medicationDispensePayload, quantityRemaining],
   );
 
-  // How the dispense quantity splits across the selected batches. Every dispense takes its
-  // stock, so it is blocked until the selection holds enough; the server would reject it
-  // otherwise.
+  // How the dispense quantity, extra included, splits across the selected batches. Every
+  // dispense takes its stock, so it is blocked until the selection holds enough; the server
+  // would reject it otherwise.
   const batchAllocation = useMemo(
-    () => allocateQuantityAcrossBatches(inventoryItems, medicationDispensePayload?.quantity?.value),
-    [inventoryItems, medicationDispensePayload?.quantity?.value],
+    () => allocateQuantityAcrossBatches(inventoryItems, totalQuantity),
+    [inventoryItems, totalQuantity],
   );
   const isStockSelectionValid = batchAllocation.allocations.length > 0 && batchAllocation.shortfall <= 0;
 
   const isButtonDisabled = !isStockSelectionValid || !isValid || isSubmitting;
 
   const handleSubmitOrDuplicateCheck = () => {
-    const duplicateDispense = medicationDispensePayload ? getDuplicateDispense(medicationDispensePayload) : null;
+    const duplicateDispense = medicationDispensePayload
+      ? getDuplicateDispense({
+          ...medicationDispensePayload,
+          quantity: { ...medicationDispensePayload.quantity, value: totalQuantity },
+        })
+      : null;
     if (config.enableDuplicateDispenseCheck && duplicateDispense) {
       handleDuplicateMedication(duplicateDispense);
     } else {
@@ -261,11 +292,14 @@ const DispenseForm: React.FC<Workspace2DefinitionProps<DispenseFormProps, {}, {}
                   setIsFreeTextDosage={setIsFreeTextDosage}
                   quantityRemaining={quantityRemaining}
                   quantityDispensed={quantityDispensed}
+                  canAddExtra={canAddExtra}
+                  extraQuantity={extraQuantity}
+                  updateExtraQuantity={setExtraQuantity}
                 />
                 <StockDispense
                   inventoryItems={inventoryItems}
                   medicationDispense={medicationDispense}
-                  quantityToDispense={medicationDispensePayload.quantity?.value}
+                  quantityToDispense={totalQuantity}
                   updateInventoryItems={setInventoryItems}
                 />
               </div>

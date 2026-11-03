@@ -7,15 +7,19 @@ import {
   MedicationRequestFulfillerStatus,
 } from '../types';
 import { type PharmacyConfig } from '../config-schema';
-import { computeNewFulfillerStatusAfterDispenseEvent, getFulfillerStatus } from '../utils';
+import { computeNewFulfillerStatusAfterDispenseEvent, exceedsQuantityRemaining, getFulfillerStatus } from '../utils';
 
 /**
  * Whether a dispense carries everything needed to be saved: a dispenser, a quantity with a
- * unit, either a fully coded or a free-text dosage (never a half-coded one), and a reason and
- * type for any substitution.
+ * unit and no more than `quantityRemaining` when that is given, either a fully coded or a
+ * free-text dosage (never a half-coded one), and a reason and type for any substitution.
  */
-export function isMedicationDispenseValid(medicationDispense: MedicationDispense, isFreeTextDosage: boolean): boolean {
-  if (!medicationDispense) {
+export function isMedicationDispenseValid(
+  medicationDispense: MedicationDispense,
+  isFreeTextDosage: boolean,
+  quantityRemaining?: number,
+): boolean {
+  if (!medicationDispense || exceedsQuantityRemaining(medicationDispense.quantity?.value, quantityRemaining)) {
     return false;
   }
   const dosageInstruction = medicationDispense.dosageInstruction?.[0];
@@ -66,7 +70,8 @@ export function prepareMedicationDispense(
  * Builds the request item for a completed dispense: the dispense, the batches it is taken from,
  * and the prescription's new fulfiller status, which goes straight to completed when
  * `completeOrderWithThisDispense` is set and is otherwise whatever the dispensed total now
- * implies, sent only when it changes.
+ * implies, sent only when it changes. Any `extraQuantity` is already included in the
+ * dispense's quantity; it is sent so the server counts only the rest against the prescription.
  */
 export function buildCompletedDispenseItem(
   medicationDispense: MedicationDispense,
@@ -74,6 +79,7 @@ export function buildCompletedDispenseItem(
   config: PharmacyConfig,
   newDispenseId: string,
   stock: Array<DispenseStockLine>,
+  extraQuantity = 0,
 ): DispenseRequestItem {
   const item: DispenseRequestItem = {
     medicationDispense: prepareMedicationDispense(
@@ -84,6 +90,9 @@ export function buildCompletedDispenseItem(
     restrictTotalQuantityDispensed: config.dispenseBehavior.restrictTotalQuantityDispensed,
     stock,
   };
+  if (extraQuantity > 0) {
+    item.extraQuantity = extraQuantity;
+  }
   if (medicationDispense.id) {
     item.update = true;
   }
