@@ -1949,7 +1949,7 @@ describe('Util Tests', () => {
   describe('test getPrescriptionDetailsEndpoint', () => {
     test('should return endpoint with encounter uuid', () => {
       expect(getPrescriptionDetailsEndpoint('123abc')).toBe(
-        '/ws/fhir2/R4/MedicationRequest?encounter=123abc&_revinclude=MedicationDispense:prescription&_include=MedicationRequest:encounter',
+        '/ws/fhir2/R4/MedicationRequest?encounter=123abc&_revinclude=MedicationDispense:prescription&_include=MedicationRequest:encounter&_count=100',
       );
     });
   });
