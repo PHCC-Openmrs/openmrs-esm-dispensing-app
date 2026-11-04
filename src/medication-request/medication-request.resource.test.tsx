@@ -774,7 +774,7 @@ describe('Medication Request Resource Test', () => {
     useSWR.mockImplementation(() => ({ data: { data: [] } }));
     usePrescriptionDetails('123abc', 10000);
     expect(useSWR).toHaveBeenCalledWith(
-      '/ws/fhir2/R4/MedicationRequest?encounter=123abc&_revinclude=MedicationDispense:prescription&_include=MedicationRequest:encounter',
+      '/ws/fhir2/R4/MedicationRequest?encounter=123abc&_revinclude=MedicationDispense:prescription&_include=MedicationRequest:encounter&_count=100',
       openmrsFetch,
       { refreshInterval: 10000 },
     );

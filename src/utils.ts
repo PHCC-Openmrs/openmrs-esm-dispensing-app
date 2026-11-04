@@ -424,8 +424,12 @@ export function getOpenMRSMedicineDrugName(medication: Medication): string {
   return medicationExtensionDrugName ? medicationExtensionDrugName.valueString : null;
 }
 
+// The FHIR server pages at 10 by default, which silently dropped the 11th and later medications of a
+// prescription. Ask for a page big enough to hold a whole prescription (the server caps it at fhir2.paging.maximum).
+const PRESCRIPTION_DETAILS_PAGE_SIZE = 100;
+
 export function getPrescriptionDetailsEndpoint(encounterUuid: string): string {
-  return `${fhirBaseUrl}/${PRESCRIPTION_DETAILS_ENDPOINT}?encounter=${encounterUuid}&_revinclude=MedicationDispense:prescription&_include=MedicationRequest:encounter`;
+  return `${fhirBaseUrl}/${PRESCRIPTION_DETAILS_ENDPOINT}?encounter=${encounterUuid}&_revinclude=MedicationDispense:prescription&_include=MedicationRequest:encounter&_count=${PRESCRIPTION_DETAILS_PAGE_SIZE}`;
 }
 
 export function getPrescriptionTableEndpoint(
