@@ -88,7 +88,7 @@ describe('Medication Request Resource Test', () => {
     );
   });
 
-  test('usePrescriptionsTable should rank a name search by where the words are in the name, and page the ranking', () => {
+  describe('a multi-word name search', () => {
     const encounter = (id: string, name: string, created: string) => ({
       resource: {
         resourceType: 'Encounter',
@@ -98,57 +98,71 @@ describe('Medication Request Resource Test', () => {
       },
     });
     const response = (...entries) => ({ data: { resourceType: 'Bundle', total: entries.length, entry: entries } });
-    const searches = [
-      response(
-        encounter('last-name', 'Ravi Sharma Kumar', '2023-01-05T10:00:00Z'),
-        encounter('karan-first', 'Karan Kumar', '2023-01-04T10:00:00Z'),
-        encounter('kumar-second', 'Anil Kumar Karan', '2023-01-06T10:00:00Z'),
-        encounter('kumar-first', 'Kumar Karan Singh', '2023-01-01T10:00:00Z'),
-      ),
-      response(
-        encounter('kumar-first', 'Kumar Karan Singh', '2023-01-01T10:00:00Z'),
-        encounter('kumar-only', 'Kumar Rao', '2023-01-07T10:00:00Z'),
-      ),
-      response(encounter('karan-only', 'Karan Rao', '2023-01-08T10:00:00Z')),
-    ];
-    // @ts-ignore
-    useSWR.mockImplementation((key) => (Array.isArray(key) ? { data: searches } : { data: undefined }));
+    const useNameSearch = (pageSize: number, pageOffset: number, searches) => {
+      // @ts-ignore
+      useSWR.mockImplementation((key) => (Array.isArray(key) ? { data: searches } : { data: undefined }));
+      return usePrescriptionsTable(
+        true,
+        '',
+        'ACTIVE',
+        pageSize,
+        pageOffset,
+        'kumar karan',
+        null,
+        10,
+        10000,
+        allButtonsEnabled,
+      );
+    };
 
-    const firstPage = usePrescriptionsTable(
-      true,
-      '',
-      'ACTIVE',
-      3,
-      0,
-      'kumar karan',
-      null,
-      10,
-      10000,
-      allButtonsEnabled,
-    );
-    const secondPage = usePrescriptionsTable(
-      true,
-      '',
-      'ACTIVE',
-      3,
-      3,
-      'kumar karan',
-      null,
-      10,
-      10000,
-      allButtonsEnabled,
-    );
+    test('shows only the patients with every word when there are any, ranked by where the words are, and pages them', () => {
+      const searches = [
+        response(
+          encounter('last-name', 'Ravi Karan Kumar', '2023-01-05T10:00:00Z'),
+          encounter('karan-first', 'Karan Kumar', '2023-01-04T10:00:00Z'),
+          encounter('kumar-second', 'Anil Kumar Karan', '2023-01-06T10:00:00Z'),
+          encounter('kumar-first', 'Kumar Karan Singh', '2023-01-01T10:00:00Z'),
+        ),
+        response(
+          encounter('kumar-first', 'Kumar Karan Singh', '2023-01-01T10:00:00Z'),
+          encounter('kumar-only', 'Kumar Rao', '2023-01-07T10:00:00Z'),
+        ),
+        response(encounter('karan-only', 'Karan Rao', '2023-01-08T10:00:00Z')),
+      ];
 
-    // "kumar karan" in the order typed (first name first, then further in), then in the reverse order, then
-    // both words anywhere, then only one of them, the one nearest the start first and the newest among equals;
-    // the ranking is paged, and counts every match
-    expect(firstPage.prescriptionsTableRows.map((row) => row.id)).toEqual([
-      'kumar-first',
-      'kumar-second',
-      'karan-first',
-    ]);
-    expect(secondPage.prescriptionsTableRows.map((row) => row.id)).toEqual(['karan-only', 'kumar-only', 'last-name']);
-    expect(firstPage.totalOrders).toBe(6); // the patient both searches found counts once
+      const firstPage = useNameSearch(3, 0, searches);
+      const secondPage = useNameSearch(3, 3, searches);
+
+      // "kumar karan" in the order typed (first name first, then further in), then in the reverse order, the
+      // nearest the start first; "Kumar Rao" and "Karan Rao" have only one of the words, so they are left out
+      expect(firstPage.prescriptionsTableRows.map((row) => row.id)).toEqual([
+        'kumar-first',
+        'kumar-second',
+        'karan-first',
+      ]);
+      expect(secondPage.prescriptionsTableRows.map((row) => row.id)).toEqual(['last-name']);
+      expect(firstPage.totalOrders).toBe(4);
+    });
+
+    test('shows the patients with some of the words when none has them all, ranked', () => {
+      const searches = [
+        response(),
+        response(
+          encounter('kumar-last', 'Ravi Kumar', '2023-01-05T10:00:00Z'),
+          encounter('kumar-first', 'Kumar Rao', '2023-01-01T10:00:00Z'),
+        ),
+        response(
+          encounter('karan-first', 'Karan Rao', '2023-01-08T10:00:00Z'),
+          encounter('kumar-first', 'Kumar Rao', '2023-01-01T10:00:00Z'),
+        ),
+      ];
+
+      const page = useNameSearch(10, 0, searches);
+
+      // the word nearest the start first, the newest among equals; the patient both searches found counts once
+      expect(page.prescriptionsTableRows.map((row) => row.id)).toEqual(['karan-first', 'kumar-first', 'kumar-last']);
+      expect(page.totalOrders).toBe(3);
+    });
   });
 
   test('usePrescriptionsTable should include location uuids', () => {
