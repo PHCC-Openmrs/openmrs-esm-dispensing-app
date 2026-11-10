@@ -62,7 +62,8 @@ export function usePrescriptionsTable(
   const locationIds = locations?.map((location) => location.id).join(',');
 
   // a search for "kumar karan" also looks for "kumar" and "karan" alone: the server only returns patients
-  // with every word in their name, and the ones with just one of them come after those in the ranking
+  // with every word in their name, and when none has them all (a typo, a missing word) the ones with just
+  // some of them are shown instead, ranked by how well they match
   const searchTerm = patientSearchTerm.trim();
   const searchWords = searchTerm.split(/\s+/).filter(Boolean);
   const searchTerms = searchTerm ? [...new Set([searchTerm, ...(searchWords.length > 1 ? searchWords : [])])] : [];
@@ -104,7 +105,11 @@ export function usePrescriptionsTable(
     openmrsFetch,
     { refreshInterval: refreshInterval },
   );
-  const data = isRanking ? mergeSearchResponses(searchResponses) : pagedData;
+  // the first search is the whole name: once it finds anyone, the patients with only some of the words are left out
+  const hasFullNameMatch = searchResponses?.[0]?.data.entry?.some(
+    (entry) => entry?.resource?.resourceType == 'Encounter',
+  );
+  const data = isRanking ? (hasFullNameMatch ? searchResponses[0] : mergeSearchResponses(searchResponses)) : pagedData;
   const error = pagedError ?? searchError;
 
   let prescriptionsTableRows: PrescriptionsTableRow[];
