@@ -126,8 +126,10 @@ const MedicationEvent: React.FC<{
 
         {/* counts whole fills, so an order with 2 refills reads "3" before anything is dispensed
             and "2" once the first fill is handed over - the refills line above is the prescriber's
-            repeat count and deliberately stays put */}
-        {fillsRemaining != null && totalFills != null && (
+            repeat count and deliberately stays put. Hidden for single-fill orders (no refills):
+            there "0 of 1" next to "Refills 0" read as a broken refill count, and the dispensed
+            line already says whether the one fill has been handed over */}
+        {fillsRemaining != null && totalFills > 1 && (
           <p className={styles.bodyLong01}>
             <span className={styles.label01}>{t('fillsRemaining', 'Fills remaining').toUpperCase()}</span>{' '}
             <span className={styles.refills}>

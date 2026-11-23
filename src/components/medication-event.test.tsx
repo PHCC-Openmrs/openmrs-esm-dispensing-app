@@ -139,6 +139,23 @@ describe('MedicationEvent', () => {
     expect(screen.getByText('2')).toBeInTheDocument();
   });
 
+  it('shows fills remaining when the order has refills', () => {
+    render(<MedicationEvent medicationEvent={baseMedicationRequest} fillsRemaining={2} totalFills={3} />);
+
+    expect(screen.getByText('FILLS REMAINING')).toBeInTheDocument();
+  });
+
+  it('hides fills remaining on a single-fill order', () => {
+    const noRefills: MedicationRequest = {
+      ...baseMedicationRequest,
+      dispenseRequest: { ...baseMedicationRequest.dispenseRequest, numberOfRepeatsAllowed: 0 },
+    };
+    render(<MedicationEvent medicationEvent={noRefills} fillsRemaining={0} totalFills={1} />);
+
+    expect(screen.getByText('REFILLS')).toBeInTheDocument();
+    expect(screen.queryByText('FILLS REMAINING')).not.toBeInTheDocument();
+  });
+
   it('renders free text dosage instructions', () => {
     const freeTextMedicationRequest: MedicationRequest = {
       ...baseMedicationRequest,
